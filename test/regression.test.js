@@ -117,6 +117,30 @@ test('diff of unchanged text produces nothing', () => {
   assert.deepEqual(diff('same', 'same'), []);
 });
 
+test('operations at the document boundaries', () => {
+  assert.equal(converge('abc', insert(3, 'X'), insert(3, 'Y')), 'abcXY');
+  assert.equal(converge('abc', insert(3, 'X'), remove(0, 3)), 'X');
+  assert.equal(converge('abc', remove(0, 3), remove(0, 3)), '');
+  assert.equal(converge('', insert(0, 'X'), insert(0, 'Y')), 'XY');
+});
+
+test('zero-length operations converge and change nothing', () => {
+  // Transform returns an empty operation when it cancels one, so these come
+  // back around as inputs and have to behave.
+  assert.equal(converge('abc', insert(1, ''), insert(1, 'X')), 'aXbc');
+  assert.equal(converge('abc', remove(1, 0), remove(1, 2)), 'a');
+  assert.equal(converge('abc', insert(0, ''), remove(0, 3)), '');
+});
+
+test('multi-character inserts shift by their whole length', () => {
+  // A one-character insert moves a position by one whether or not the code
+  // actually consulted its length, so this is the case that catches an
+  // off-by-length rather than an off-by-one.
+  assert.equal(converge('abc', insert(1, 'XYZW'), insert(1, 'Q')), 'aXYZWQbc');
+  assert.equal(converge('abc', insert(2, 'XYZW'), remove(0, 1)), 'bXYZWc');
+  assert.equal(converge('abcdef', remove(4, 2), insert(1, 'XYZW')), 'aXYZWbcd');
+});
+
 test('a cancelled operation reports itself as a no-op', () => {
   const cancelled = transform(insert(2, 'X'), remove(1, 3), 'left');
   assert.ok(isNoop(cancelled));

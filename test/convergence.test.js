@@ -33,10 +33,17 @@ function randomOperation(random, doc) {
   const size = Array.from(doc).length;
   if (size === 0 || random() < 0.5) {
     const position = Math.floor(random() * (size + 1));
-    return insert(position, 'XYZW'[Math.floor(random() * 4)]);
+    // Length 0 to 4. Single-character inserts were all the first version of
+    // this generator produced, which left the length arithmetic in three of the
+    // four transform branches barely exercised — a one-character insert shifts
+    // a position by one whether or not the code meant to use its length. Zero
+    // is in the range because a transform that cancels an operation returns an
+    // empty one, and those get fed back through.
+    const size4 = Math.floor(random() * 5);
+    return insert(position, 'XYZW'.slice(0, size4));
   }
   const position = Math.floor(random() * size);
-  const length = 1 + Math.floor(random() * Math.min(3, size - position));
+  const length = Math.floor(random() * (Math.min(4, size - position) + 1));
   return remove(position, length);
 }
 

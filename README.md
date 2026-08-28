@@ -64,13 +64,14 @@ import { insert, remove, apply, transform, diff } from '@yuvrajinbhakti/ot-engin
 const doc = 'the cat sat';
 
 // Two people edit the same text at the same moment.
-const mine   = insert(4, 'big ');   // "the big cat sat"
-const theirs = remove(4, 3);        // "the sat"
+const mine   = insert(4, 'big ');   // on its own: "the big cat sat"
+const theirs = remove(4, 4);        // on its own: "the sat"
 
 // Each applies their own edit, then the other's — transformed.
 const iSee    = apply(apply(doc, mine),   transform(theirs, mine,   'right'));
 const theySee = apply(apply(doc, theirs), transform(mine,   theirs, 'left'));
 
+iSee;             // "the big sat"
 iSee === theySee; // true, and that is the whole job
 ```
 
@@ -97,6 +98,16 @@ import { transformAgainst } from '@yuvrajinbhakti/ot-engine';
 
 const rebased = transformAgainst(incoming, historySince(incoming.version), 'left');
 ```
+
+Two things this assumes, and neither is checked for you: the history is in the
+order it was actually applied, and `incoming` was written against the document
+as it stood immediately before the first of them. Fold the wrong range in and
+the result is silently wrong rather than an error.
+
+A single `side` for the whole run is correct when a server decides the order,
+because the question is only ever "does the incoming edit yield to the settled
+history" — and the answer is the same for every operation in it. Peer-to-peer
+with no arbiter is a different problem and needs a side per originating peer.
 
 ### Choosing a side
 
@@ -162,7 +173,7 @@ position rather than two.
 ## Testing
 
 ```bash
-npm test     # 20 tests, 320,000 fuzzed convergence checks
+npm test     # 23 tests, 320,000 fuzzed convergence checks
 npm run bench
 ```
 
