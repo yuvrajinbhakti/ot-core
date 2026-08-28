@@ -1,5 +1,9 @@
 # ot-core
 
+[![test](https://github.com/yuvrajinbhakti/ot-core/actions/workflows/test.yml/badge.svg)](https://github.com/yuvrajinbhakti/ot-core/actions/workflows/test.yml)
+[![npm](https://img.shields.io/npm/v/ot-core.svg)](https://www.npmjs.com/package/ot-core)
+[![zero dependencies](https://img.shields.io/badge/dependencies-0-brightgreen.svg)](package.json)
+
 Operational Transform for plain text, with the convergence property actually
 tested.
 
