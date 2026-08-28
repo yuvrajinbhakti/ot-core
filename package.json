@@ -1,0 +1,42 @@
+{
+  "name": "@yuvrajinbhakti/ot-engine",
+  "version": "1.0.0",
+  "description": "Operational Transform for plain text, with the convergence property actually tested.",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./src/index.js"
+    }
+  },
+  "types": "./index.d.ts",
+  "files": [
+    "src",
+    "index.d.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test \"test/*.test.js\"",
+    "bench": "node bench/transform.bench.js"
+  },
+  "keywords": [
+    "operational-transform",
+    "ot",
+    "collaborative-editing",
+    "crdt",
+    "realtime",
+    "convergence"
+  ],
+  "license": "MIT",
+  "author": "Yuvraj Singh Nain",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yuvrajinbhakti/ot-engine.git"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "sideEffects": false
+}
