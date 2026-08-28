@@ -1,0 +1,26 @@
+# A library whose entire claim is "the convergence property is actually tested"
+# has to run those tests where anyone can see the result.
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 18 is the floor declared in package.json engines; the others are what
+        # people are actually on.
+        node: [18, 20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      # No install step, because there are no dependencies. If that ever stops
+      # being true this job will fail loudly, which is the intent.
+      - run: npm test

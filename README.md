@@ -38,6 +38,7 @@ suite is the point of it.
 200,000 random concurrent pairs   0 divergences
  50,000 on longer documents       0 divergences
  20,000 on emoji                  0 divergences
+100,000 cursor moves              0 drifted off their character
 ```
 
 ## The three bugs
@@ -122,6 +123,34 @@ const side = myId < peerId ? 'left' : 'right';
 Getting this wrong is silent. Everything works until two people type in the same
 place.
 
+### Moving cursors and selections
+
+Transforming the document is half of collaborative editing. The other half is
+that every caret, selection and highlight anchored to the text has to move with
+it, or a remote insert three lines up quietly slides your cursor into the middle
+of a word.
+
+```js
+import { transformPosition, transformSelection } from '@yuvrajinbhakti/ot-engine';
+
+socket.on('operation', (op) => {
+  setDoc((doc) => apply(doc, op));
+  setCaret((caret) => transformPosition(caret, op));
+  setSelection((selection) => transformSelection(selection, op));
+});
+```
+
+`transformPosition` takes the same `'left'` / `'right'` bias, and it decides one
+thing: what happens when an insert lands *exactly* on the position. `'left'` is
+the default and keeps the cursor where it is, so a collaborator typing at your
+caret does not drag it along. Use `'right'` for the local echo of your own
+typing, where the caret should follow what you wrote.
+
+`transformSelection` leans each end outward, so text arriving at either boundary
+falls *outside* the selection. The intuitive-looking choice — leaning both ends
+inward — makes a selection silently grow to cover whatever a collaborator types
+at its edges.
+
 ## The trade-off you should know about
 
 If you type into text that someone else is deleting at that exact moment, your
@@ -164,6 +193,8 @@ compact.
 | `applyAll(doc, ops)`                | apply several, in order                                   |
 | `transform(a, b, side)`             | rewrite `a` to apply after `b`                            |
 | `transformAgainst(a, ops, side)`    | rewrite `a` over a run of operations, oldest first        |
+| `transformPosition(pos, op, bias)`  | move a caret when `op` is applied                         |
+| `transformSelection(sel, op)`       | move both ends of a `{ anchor, head }` selection          |
 | `diff(before, after)`               | turn two document states into operations                  |
 | `isNoop(op)`                        | did transform cancel this operation?                      |
 
@@ -173,7 +204,7 @@ position rather than two.
 ## Testing
 
 ```bash
-npm test     # 23 tests, 320,000 fuzzed convergence checks
+npm test     # 37 tests, 420,000 fuzzed checks
 npm run bench
 ```
 
@@ -185,9 +216,13 @@ is looking for only appear when two edits genuinely overlap.
 ## What this is not
 
 Not a CRDT: it needs a server to order operations. Not rich text: plain strings
-only. No undo stack, no cursor transformation, no presence. Those are all
-buildable on top, and none of them belong in the part that has to be provably
-correct.
+only. No undo stack and no presence.
+
+No `compose` either, and that is a consequence of the model rather than an
+omission: two sequential operations far apart in a document cannot be expressed
+as one position and one length, so a compose here could only ever return the
+array you already had. Compaction in this model means dropping history every
+client has acknowledged, not merging operations together.
 
 ## License
 
