@@ -1,10 +1,10 @@
-# ot-engine
+# ot-core
 
 Operational Transform for plain text, with the convergence property actually
 tested.
 
 ```bash
-npm install @yuvrajinbhakti/ot-engine
+npm install ot-core
 ```
 
 Zero dependencies. ESM. Node 18+ and any modern browser.
@@ -60,7 +60,7 @@ inserted text survived. They now agree — see the trade-off below.
 ## Using it
 
 ```js
-import { insert, remove, apply, transform, diff } from '@yuvrajinbhakti/ot-engine';
+import { insert, remove, apply, transform, diff } from 'ot-core';
 
 const doc = 'the cat sat';
 
@@ -95,7 +95,7 @@ When an edit written against version N arrives and the document is already at
 N+2, fold it over everything it missed:
 
 ```js
-import { transformAgainst } from '@yuvrajinbhakti/ot-engine';
+import { transformAgainst } from 'ot-core';
 
 const rebased = transformAgainst(incoming, historySince(incoming.version), 'left');
 ```
@@ -131,7 +131,7 @@ it, or a remote insert three lines up quietly slides your cursor into the middle
 of a word.
 
 ```js
-import { transformPosition, transformSelection } from '@yuvrajinbhakti/ot-engine';
+import { transformPosition, transformSelection } from 'ot-core';
 
 socket.on('operation', (op) => {
   setDoc((doc) => apply(doc, op));

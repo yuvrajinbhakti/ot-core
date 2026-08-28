@@ -1,5 +1,5 @@
 {
-  "name": "@yuvrajinbhakti/ot-engine",
+  "name": "ot-core",
   "version": "1.0.0",
   "description": "Operational Transform for plain text, with the convergence property actually tested.",
   "type": "module",
@@ -33,10 +33,14 @@
   "author": "Yuvraj Singh Nain",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/yuvrajinbhakti/ot-engine.git"
+    "url": "git+https://github.com/yuvrajinbhakti/ot-core.git"
   },
   "engines": {
     "node": ">=18"
   },
-  "sideEffects": false
+  "sideEffects": false,
+  "bugs": {
+    "url": "https://github.com/yuvrajinbhakti/ot-core/issues"
+  },
+  "homepage": "https://github.com/yuvrajinbhakti/ot-core#readme"
 }
