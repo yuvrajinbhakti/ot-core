@@ -195,6 +195,49 @@ row. That is TP2 missing, live, in one click.
 Building it found four things wrong with the library, which is the actual reason
 it exists — see the end of the next section.
 
+## In a real editor
+
+```bash
+npm install ot-core @codemirror/state @codemirror/view
+```
+
+```js
+import { collaborate } from 'ot-core/codemirror';
+
+const view = new EditorView({
+  doc: client.document,
+  parent: element,
+  extensions: [collaborate(client)],
+});
+```
+
+That is the whole binding from the outside. Inside it is about a hundred lines
+doing two things that are easy to get wrong:
+
+**Units.** CodeMirror counts UTF-16 code units and this library counts code
+points, so an emoji is two to one of them and one to the other. Every offset
+crossing that boundary is converted, and a change that would cut a character in
+half — which CodeMirror will happily do if a program asks — is widened to cover
+it, because "half a code point" is not something this operation model can say.
+
+**Echo.** An operation arriving from the server is applied to the editor, which
+fires the same update listener a keystroke does. Sent back, it reaches the server
+twice. Remote transactions carry an annotation and are skipped on the way out.
+
+Multiple cursors work, which is the part a textarea cannot test:
+`iterChanges` reports every change in the *original* document's coordinates, so
+the running offset in `operationsFromChanges` is what keeps the second cursor's
+edit in the right place once the first has changed the length.
+
+Live at **[/demo/editor.html](https://yuvrajinbhakti.github.io/ot-core/demo/editor.html)**.
+Typing `HELLO` into one editor there sends two operations, not five — the first
+keystroke goes, the other four compose behind it — and the other editor sends
+nothing back.
+
+`@codemirror/state` and `@codemirror/view` are optional peer dependencies.
+Nothing else in the package imports them, so `ot-core` is still zero-dependency
+for anybody who does not import this file.
+
 ## The client and the server
 
 The algebra above is the hard part and it is not a collaborative editor. What
@@ -497,6 +540,7 @@ compact.
 | `isValid(op, docLength?)`           | is this safe to apply?                                    |
 | `whyInvalid(op, docLength?)`        | the reason it is not, or `null`                           |
 | `assertValid(op, docLength?)`       | the same, but throws                                      |
+| `collaborate(client)`               | a CodeMirror extension bound to a client                  |
 
 From `ot-core/client`, `ot-core/server`, `ot-core/websocket` and
 `ot-core/protocol`:
@@ -516,7 +560,7 @@ position rather than two.
 ## Testing
 
 ```bash
-npm test     # 98 tests, 920,000 property checks + 55,000 simulated sessions
+npm test     # 110 tests, 1,020,000 property checks + 55,000 simulated sessions
 npm run demo # the playground, at http://localhost:4180/demo/
 npm run bench
 ```

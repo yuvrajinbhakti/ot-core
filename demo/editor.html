@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ot-core in CodeMirror</title>
+<meta name="description" content="Two real CodeMirror editors on one document, over a laggy wire.">
+<link rel="stylesheet" href="style.css">
+<style>
+  .editors { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+  .editor-pane {
+    background: var(--panel); border: 1px solid var(--line);
+    border-left: 3px solid var(--who, var(--line));
+    border-radius: 10px; padding: 14px 16px;
+  }
+  .cm-editor { border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2); }
+  .cm-editor.cm-focused { outline: 2px solid var(--who, var(--accent)); outline-offset: -1px; }
+  .cm-scroller { font-family: var(--mono) !important; font-size: 13px; line-height: 1.6; min-height: 150px; }
+  .cm-content { caret-color: var(--who, var(--ink)); }
+  .cm-gutters { background: var(--panel-2); border-right: 1px solid var(--line); color: var(--dimmer); }
+  .cm-activeLine, .cm-activeLineGutter { background: rgba(255,255,255,.03); }
+</style>
+<!--
+  An import map rather than a bundler, so this page is still just files.
+  `?external=@codemirror/state` matters: without it esm.sh gives @codemirror/view
+  its own bundled copy of the state package, there are two of them on the page,
+  and the Annotation this binding uses to recognise its own transactions stops
+  matching the one the editor sees. Two copies of a module that exports
+  identities is the classic way a working thing breaks.
+-->
+<script type="importmap">
+{
+  "imports": {
+    "@codemirror/state": "https://esm.sh/@codemirror/state@6.5.2",
+    "@codemirror/view": "https://esm.sh/@codemirror/view@6.36.4?external=@codemirror/state",
+    "@codemirror/commands": "https://esm.sh/@codemirror/commands@6.8.0?external=@codemirror/state,@codemirror/view"
+  }
+}
+</script>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1><code>ot-core</code> in CodeMirror</h1>
+    <p>
+      Two real editors on one document, over a wire you can slow down. Type in
+      both at once and watch them agree — including with the cursor in the
+      middle of somebody else's sentence, which is the case a textarea demo
+      cannot show you.
+    </p>
+    <p style="margin-top:10px;color:var(--dimmer);font-size:13px;max-width:64ch">
+      The binding is <code>ot-core/codemirror</code>, about a hundred lines.
+      CodeMirror counts UTF-16 code units and this library counts code points,
+      so every offset crossing that boundary is converted — try pasting an
+      emoji and editing either side of it.
+      <a href="./">Back to the playground</a>.
+    </p>
+  </header>
+
+  <div class="controls">
+    <div class="control">
+      <label for="latency">Latency <b id="latency-v">400</b> ms</label>
+      <input type="range" id="latency" min="0" max="2000" step="50" value="400">
+    </div>
+    <div class="control actions">
+      <button class="act primary" id="collide">Both type at once</button>
+      <button class="act" id="emoji">Insert an emoji</button>
+      <button class="act" id="reset">Reset</button>
+    </div>
+  </div>
+
+  <div class="status" id="status" data-state="converged">
+    <span class="dot"></span>
+    <span id="status-text">Both editors agree.</span>
+    <span class="detail" id="status-detail"></span>
+  </div>
+
+  <section class="server-pane">
+    <div class="pane-head">
+      <span class="name">Server</span>
+      <span class="badge">authority</span>
+      <span class="meta" id="server-meta">revision 0</span>
+    </div>
+    <div class="doc" id="server-doc"></div>
+  </section>
+
+  <section class="editors" id="editors"></section>
+
+  <div class="log-head">
+    <h2>The wire</h2>
+    <span>operations, as the binding produces them</span>
+  </div>
+  <div class="log" id="log"></div>
+
+  <footer>
+    <code>@codemirror/state</code> and <code>@codemirror/view</code> are peer
+    dependencies — <code>ot-core</code> itself still has none, and nothing
+    outside this binding imports them.
+    <a href="https://github.com/yuvrajinbhakti/ot-core">Source</a>.
+  </footer>
+
+</div>
+<script type="module" src="editor.js"></script>
+</body>
+</html>

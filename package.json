@@ -1,6 +1,6 @@
 {
   "name": "ot-core",
-  "version": "1.2.1",
+  "version": "1.3.0",
   "description": "Operational Transform for plain text: the algebra, a client state machine, a server, and a transport \u2014 with convergence actually tested.",
   "type": "module",
   "main": "./src/index.js",
@@ -24,6 +24,10 @@
     "./websocket": {
       "types": "./websocket.d.ts",
       "import": "./src/websocket.js"
+    },
+    "./codemirror": {
+      "types": "./codemirror.d.ts",
+      "import": "./src/codemirror.js"
     }
   },
   "types": "./index.d.ts",
@@ -39,12 +43,13 @@
     "demo": "node demo/serve.js"
   },
   "keywords": [
+    "codemirror",
+    "collaborative-editing",
+    "convergence",
+    "crdt",
     "operational-transform",
     "ot",
-    "collaborative-editing",
-    "crdt",
-    "realtime",
-    "convergence"
+    "realtime"
   ],
   "license": "MIT",
   "author": "Yuvraj Singh Nain",
@@ -61,6 +66,20 @@
   },
   "homepage": "https://github.com/yuvrajinbhakti/ot-core#readme",
   "devDependencies": {
+    "@codemirror/state": "^6.7.1",
+    "@codemirror/view": "^6.43.9",
     "ws": "^8.21.3"
+  },
+  "peerDependencies": {
+    "@codemirror/state": "^6.0.0",
+    "@codemirror/view": "^6.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@codemirror/state": {
+      "optional": true
+    },
+    "@codemirror/view": {
+      "optional": true
+    }
   }
 }
