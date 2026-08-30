@@ -123,6 +123,12 @@ export const ERRORS = Object.freeze({
   FUTURE_REVISION: 'future-revision',
   BEHIND_HISTORY: 'behind-history',
   OUT_OF_RANGE: 'out-of-range',
+  /**
+   * The client received an operation from the future — revisions are missing.
+   * It cannot rebase across a gap it never saw, so it must resync. Loud,
+   * because the alternative is a document that is quietly wrong.
+   */
+  GAP: 'gap',
 });
 
 /** JSON, with the validation that a bare JSON.parse leaves to chance. */

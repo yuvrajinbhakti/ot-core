@@ -35,7 +35,8 @@
   ],
   "scripts": {
     "test": "node --test test/*.test.js",
-    "bench": "node bench/transform.bench.js"
+    "bench": "node bench/transform.bench.js",
+    "demo": "node demo/serve.js"
   },
   "keywords": [
     "operational-transform",
