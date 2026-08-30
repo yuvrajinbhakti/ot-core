@@ -56,6 +56,13 @@ const asText = (data) =>
  * always made a fresh `Client`, so coming back from offline meant throwing away
  * the buffered edits that were the entire reason the client had state.
  *
+ * Call this on a socket that has not opened yet. A server writes the document —
+ * or, for a returning client, everything it missed — the moment the connection
+ * lands, and a message that arrives before there is a listener is simply gone.
+ * Waiting for `open` and attaching afterwards loses it, and the loss is silent:
+ * the client carries on a revision behind and rebases everything after it
+ * against a history that is missing a step.
+ *
  * @param {Client} client
  * @param {SocketLike} socket
  * @param {object} [options]
@@ -207,7 +214,19 @@ export class Room {
   leave(clientId) {
     const gone = this.members.delete(clientId);
     if (gone) {
-      this.server.forget(clientId);
+      // Deliberately NOT `server.forget(clientId)`, which is what this used to
+      // do. The server remembers the last sequence number each client had
+      // accepted, and that memory exists for exactly one situation: a socket
+      // that died between the operation landing and the acknowledgement getting
+      // home, after which the client cannot tell "never arrived" from "never
+      // acknowledged" and has to resend. Forgetting on close threw the memory
+      // away at the precise moment it was about to matter — the client came
+      // back, resent, and the server applied the edit a second time.
+      //
+      // Real sockets found this; fake ones could not, because the fake never
+      // closed between a write and its delivery. The entry is two numbers per
+      // participant, so keeping it is free. `Server.forget` is still there for
+      // a caller that knows a client is gone for good.
       this.#compact();
     }
     return gone;

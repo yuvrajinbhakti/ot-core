@@ -21,6 +21,28 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-      # No install step, because there are no dependencies. If that ever stops
-      # being true this job will fail loudly, which is the intent.
+          cache: npm
+
+      # There is one devDependency — `ws`, for the tests that use a real socket
+      # rather than one of mine. Without it those tests skip themselves with a
+      # reason, which is right for a contributor who has not installed anything
+      # and wrong here: skipping quietly is how a suite stops testing the thing
+      # it was written for.
+      - run: npm ci
+
+      # So the runtime claim is checked rather than asserted. The published
+      # package must have no dependencies at all; this fails if one appears.
+      - name: the package itself has no dependencies
+        run: |
+          count=$(node -p "Object.keys(require('./package.json').dependencies ?? {}).length")
+          echo "runtime dependencies: $count"
+          test "$count" -eq 0
+
       - run: npm test
+
+      # And that the real-socket tests actually ran, rather than skipping.
+      - name: no test may have been skipped
+        run: |
+          skipped=$(npm test 2>&1 | grep -oE '^# skipped [0-9]+' | grep -oE '[0-9]+')
+          echo "skipped: $skipped"
+          test "$skipped" -eq 0

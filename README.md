@@ -248,11 +248,12 @@ has to be transformed past the outstanding operation *and* past every buffered
 one in order, while each of those is rebased past it. Doing only the first half
 looks entirely plausible and works until three people overlap.
 
-### Six bugs this found, and none of them were in the algebra
+### Nine bugs this found, and none of them were in the algebra
 
-Four came out of 30,000 simulated sessions with a deliberately hostile wire, and
-two more out of building the playground on top of the result. Every one of them
-passed a hand-written example first.
+Four came out of 30,000 simulated sessions with a deliberately hostile wire, two
+more out of building the playground on top of the result, and three more the
+first time any of it touched a real socket. Every one of them passed a
+hand-written example first.
 
 **A resend must replay the message, not rebuild it.** Between the first send and
 the resend, arriving operations rebase the outstanding operation — so a rebuilt
@@ -293,6 +294,28 @@ resynced from a snapshot that silently discards everything it typed while
 offline. `Room` keeps a retention window past what connected members need,
 because the cost is a few hundred operations and the alternative is losing a
 user's work.
+
+**A room must not forget a client when its socket closes.** The server remembers
+the last sequence number each client had accepted, and that memory exists for
+exactly one situation: a socket that died between the operation landing and the
+acknowledgement getting home. `leave` was discarding it at the precise moment it
+was about to matter, so the client came back, resent, and the edit was applied a
+second time.
+
+**A client must ignore its own operation arriving as history.** On a rejoin the
+server sends everything after the client's revision, and the client's own
+unacknowledged edit is among it. Applying that as though somebody else wrote it
+inserts the text twice on that client alone.
+
+**An acknowledgement may not skip a revision.** It lands at exactly one past
+where the client is, because everything the server accepted in between reaches
+it first on the same socket. Taking a further one anyway means the next buffered
+edit is sent claiming a baseline the client never had, and the server rebases it
+from the wrong place — one character, one position early, no complaint.
+
+All three needed a real socket. A fake never closes between a write and its
+delivery, never hands a message to a listener that has not been attached yet,
+and never delivers on a later turn of the event loop.
 
 The test harness asserts that a well-formed client is *never* rejected — the
 recovery path exists, and letting it run would hide the next real bug.
@@ -486,10 +509,15 @@ position rather than two.
 ## Testing
 
 ```bash
-npm test     # 89 tests, 920,000 property checks + 55,000 simulated sessions
+npm test     # 98 tests, 920,000 property checks + 55,000 simulated sessions
 npm run demo # the playground, at http://localhost:4180/demo/
 npm run bench
 ```
+
+Six of those run over a real WebSocket — `ws` is the only devDependency, and the
+published package still has none. They skip with a reason if it is not
+installed, and CI fails if anything skips, because a suite that quietly stops
+testing the thing it was written for is worse than one that is simply absent.
 
 The fuzzer uses a fixed seed, so a failure is reproducible rather than a story
 about something that happened once on CI. It also biases hard towards
