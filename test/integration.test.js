@@ -40,8 +40,18 @@ const skip = ws ? false : 'ws is not installed — run `npm install` to include 
  * nothing on its own — the first version of this file failed intermittently and
  * "timed out waiting for the reconnect" was the entire evidence. Printing what
  * everybody actually held turned a guessing game into a two-minute read.
+ *
+ * The deadline is deliberately far longer than anything here needs; a passing
+ * run settles in tens of milliseconds. It is set for the machine, not the code.
+ * One failure was seen in roughly eighty-five runs, on a laptop that also had a
+ * browser driving the demo at the time, and it did not reproduce in thirty-six
+ * further runs at twelve-way parallelism. A deadline is the only thing in this
+ * file that a busy machine can trip on its own — a real convergence failure
+ * shows up as two different documents, not as waiting — so the deadline is
+ * where the headroom goes. That is a judgement, not a diagnosis: the failure
+ * was never caught in the act.
  */
-function settled(predicate, { timeout = 8000, label = 'condition', state } = {}) {
+function settled(predicate, { timeout = 30_000, label = 'condition', state } = {}) {
   return new Promise((resolve, reject) => {
     const start = Date.now();
     const tick = () => {
@@ -117,7 +127,7 @@ function joinRoom(room, id) {
     const errors = [];
     // Cleared on both paths. Left running, these accumulate across the tests in
     // this file and keep firing into promises that settled long ago.
-    const giveUp = setTimeout(() => reject(new Error(`${id} never received init`)), 5000);
+    const giveUp = setTimeout(() => reject(new Error(`${id} never received init`)), 30_000);
     const client = connect(socket, {
       id,
       onError: (e) => errors.push(e),
@@ -309,7 +319,7 @@ test('five clients editing at once over real sockets all agree', { skip }, async
     () =>
       members.every((m) => m.client.state === 'synchronized') &&
       members.every((m) => m.client.document === room.server.document),
-    { label: '30 concurrent edits to settle', timeout: 15000 }
+    { label: '30 concurrent edits to settle' }
   );
 
   const documents = new Set(members.map((m) => m.client.document));
