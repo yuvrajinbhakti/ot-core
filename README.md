@@ -178,12 +178,19 @@ Two modes, and the second is the argument for the first. **Fire the
 counterexample** pushes the same three concurrent edits either way:
 
 ```
-with a server        Ana "XYXb"   Bo "XYXb"   Cy "XYXb"     converged
+with a server        all three agree                        converged
 peer to peer         Ana "XYXb"   Bo "XYXb"   Cy "XXYb"     diverged
 ```
 
-Identical edits, identical tie-break rule, two different documents. That is TP2
-missing, live, in one click.
+Deliberately not naming the string the server settles on, because it is not
+fixed and saying otherwise was wrong here until measured: five runs over a
+jittery wire produced "XYXb" four times and "XXYb" once, depending on the order
+the three edits happened to reach the server. Every run had all three clients
+agreeing, which is the entire claim. *Which* order gets chosen does not matter;
+that one gets chosen is the whole job.
+
+Identical edits, identical tie-break rule, two different documents on the second
+row. That is TP2 missing, live, in one click.
 
 Building it found four things wrong with the library, which is the actual reason
 it exists — see the end of the next section.
