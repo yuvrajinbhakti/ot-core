@@ -172,3 +172,35 @@ footer a { color: var(--dim); }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }
+
+.doc-note {
+  margin: 10px 0 0;
+  color: var(--dimmer);
+  font-size: 12px;
+  line-height: 1.6;
+  max-width: 74ch;
+}
+
+/* --- who wrote what --------------------------------------------------- */
+.doc .ch { transition: color .2s; }
+
+/* A caret belonging to somebody else. Two pixels of colour is enough — this
+   is a document with three people in it, not a light show. */
+.doc .caret {
+  display: inline-block;
+  width: 2px;
+  height: 1.15em;
+  vertical-align: -0.22em;
+  margin: 0 -1px;
+  border-radius: 1px;
+  animation: blink 1.1s steps(2, start) infinite;
+}
+@keyframes blink { 0%, 100% { opacity: 1 } 50% { opacity: .25 } }
+@media (prefers-reduced-motion: reduce) {
+  .doc .caret { animation: none; }
+}
+
+/* Each pane carries its owner's colour, so a name in the document and a name
+   on a pane are obviously the same person. */
+.client { border-left: 3px solid var(--who, var(--line)); }
+.client textarea:focus { outline-color: var(--who, var(--accent)); }

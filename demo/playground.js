@@ -21,6 +21,18 @@ import { attach, Room } from '../src/websocket.js';
 const OPENING = 'the quick brown fox';
 const IDS = ['Ana', 'Bo', 'Cy'];
 
+/**
+ * One colour each, and the reason is not decoration.
+ *
+ * Three people typing at nearby positions produce genuinely interleaved text —
+ * "the very qquite urather ick brown fox" is the correct answer and it reads as
+ * corruption. Colouring each character by who wrote it turns the most confusing
+ * thing on the page into the most convincing one: you can see three edits
+ * landing inside each other and every copy agreeing about the result.
+ */
+const COLOURS = { Ana: '#60a5fa', Bo: '#34d399', Cy: '#fbbf24' };
+const colourOf = (id) => COLOURS[id] ?? '#8b97ad';
+
 /** What a rebuilt world starts from. The counterexample needs its own. */
 let startText = OPENING;
 
@@ -159,6 +171,27 @@ let onSocketDeath = null;
 
 function buildServerWorld() {
   const server = new Server({ document: startText });
+
+  // Who wrote each code point, kept alongside the document. The server already
+  // knows — every operation it accepts arrives with an author and comes back
+  // rebased into the document's own coordinates — so this only has to follow
+  // along. Wrapping `receive` rather than reaching inside `Room` keeps the
+  // library unaware that anything is watching.
+  const attribution = Array.from(startText).map(() => null);
+  const accept = server.receive.bind(server);
+  server.receive = (clientId, message) => {
+    const result = accept(clientId, message);
+    if (result.applied && result.broadcast) {
+      const op = result.broadcast.op;
+      if (op.type === 'insert') {
+        attribution.splice(op.position, 0, ...Array.from(op.content).map(() => clientId));
+      } else {
+        attribution.splice(op.position, op.length);
+      }
+    }
+    return result;
+  };
+
   const room = new Room(server);
   const peers = IDS.map((id) => {
     const client = new Client({
@@ -171,7 +204,7 @@ function buildServerWorld() {
     return peer;
   });
 
-  const built = { kind: 'server', server, room, peers };
+  const built = { kind: 'server', server, room, peers, attribution };
 
   onSocketDeath = (link) => {
     const peer = peers.find((p) => p.link === link || p.link?.partner === link);
@@ -306,10 +339,25 @@ function renderClients() {
         <span class="pending"></span>
         <button class="act toggle"></button>
       </div>`;
-    node.querySelector('.name').textContent = p.id;
+    const name = node.querySelector('.name');
+    name.textContent = p.id;
+    name.style.color = colourOf(p.id);
+    node.style.setProperty('--who', colourOf(p.id));
     const area = node.querySelector('textarea');
     area.setAttribute('aria-label', `${p.id}'s copy of the document`);
     area.value = docOf(p);
+
+    // Moving the caret is not an edit, but it is something the other panes
+    // should see — so it is reported the same way typing is.
+    const reportCaret = () => {
+      if (world.kind !== 'server') return;
+      const at = toCodePoints(area.value, area.selectionStart);
+      p.client.selection = { anchor: at, head: at };
+      render();
+    };
+    area.addEventListener('click', reportCaret);
+    area.addEventListener('keyup', reportCaret);
+    area.addEventListener('focus', reportCaret);
 
     area.addEventListener('input', () => {
       const caret = toCodePoints(area.value, area.selectionStart);
@@ -336,7 +384,7 @@ function render() {
 
   if (world.kind === 'server') {
     el.serverPane.hidden = false;
-    el.serverDoc.textContent = world.server.document;
+    renderSharedDocument();
     el.serverMeta.textContent =
       `revision ${world.server.revision} · history ${world.server.history.length}`;
   } else {
@@ -385,6 +433,57 @@ function render() {
   }
 
   renderStatus(docs);
+}
+
+/**
+ * The document as a collaborative editor would show it: every character in the
+ * colour of whoever typed it, and everybody's caret where it actually is.
+ *
+ * One span per character rather than runs. A demo document is tens of
+ * characters long, the browser does not care, and grouping runs while also
+ * breaking them at every caret position is fiddly code in service of nothing.
+ */
+function renderSharedDocument() {
+  const chars = Array.from(world.server.document);
+  const attribution = world.attribution;
+
+  // Carets come from the clients themselves — `Client` keeps `selection` in
+  // step with every remote edit, using the same transformPosition the library
+  // exports. Nothing here recomputes them.
+  const carets = new Map();
+  for (const p of world.peers) {
+    if (!p.online || !p.client?.selection) continue;
+    const at = Math.max(0, Math.min(p.client.selection.head, chars.length));
+    if (!carets.has(at)) carets.set(at, []);
+    carets.get(at).push(p.id);
+  }
+
+  const frag = document.createDocumentFragment();
+  const putCarets = (at) => {
+    for (const id of carets.get(at) ?? []) {
+      const caret = document.createElement('span');
+      caret.className = 'caret';
+      caret.style.background = colourOf(id);
+      caret.title = `${id}'s cursor`;
+      frag.append(caret);
+    }
+  };
+
+  for (let i = 0; i < chars.length; i++) {
+    putCarets(i);
+    const span = document.createElement('span');
+    span.className = 'ch';
+    const author = attribution[i] ?? null;
+    if (author) {
+      span.style.color = colourOf(author);
+      span.title = `${author} typed this`;
+    }
+    span.textContent = chars[i];
+    frag.append(span);
+  }
+  putCarets(chars.length);
+
+  el.serverDoc.replaceChildren(frag);
 }
 
 function renderStatus(docs) {
