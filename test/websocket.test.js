@@ -10,7 +10,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { insert } from '../src/index.js';
 import { Server } from '../src/server.js';
-import { connect, Room } from '../src/websocket.js';
+import { connect, attach, Room } from '../src/websocket.js';
 
 /** A WebSocket-shaped object wired directly to a partner. */
 class FakeSocket {
@@ -49,9 +49,9 @@ class FakeSocket {
   }
 }
 
-function makeRoom(document = 'hello') {
+function makeRoom(document = 'hello', options) {
   const server = new Server({ document });
-  return { server, room: new Room(server) };
+  return { server, room: new Room(server, options) };
 }
 
 function addClient(room, id) {
@@ -173,7 +173,9 @@ test('leaving the room stops the fan-out and forgets the client', () => {
 });
 
 test('history is compacted down to the slowest member still present', () => {
-  const { server, room } = makeRoom('');
+  // retain: 0 — the default keeps a window precisely so a dropped client can
+  // come back, which is the subject of the reconnect test below.
+  const { server, room } = makeRoom('', { retain: 0 });
   const a = addClient(room, 'a');
   const b = addClient(room, 'b');
 
@@ -188,7 +190,7 @@ test('history is compacted down to the slowest member still present', () => {
 });
 
 test('an empty room keeps no history at all', () => {
-  const { server, room } = makeRoom('abc');
+  const { server, room } = makeRoom('abc', { retain: 0 });
   const a = addClient(room, 'a');
   a.client.edit(insert(3, 'd'));
   assert.equal(server.revision, 1);
@@ -232,4 +234,103 @@ test('it works with an EventEmitter-shaped socket too', () => {
   client.edit(insert(4, 'js'));
   assert.equal(server.document, 'nodejs');
   assert.equal(client.state, 'synchronized');
+});
+
+test('a reconnecting client keeps its buffered work', () => {
+  // The gap the playground found. `connect` builds a new Client, so using it to
+  // come back from offline discards the edits the state machine was holding —
+  // which is the only reason it holds them.
+  const { server, room } = makeRoom('abc');
+  const a = addClient(room, 'a');
+  const b = addClient(room, 'b');
+
+  a.clientSide.close();                     // a's socket dies
+  assert.equal(room.members.size, 1);
+
+  a.client.disconnect();
+  a.client.edit(insert(3, 'OFFLINE'));      // in flight, nowhere to go
+  a.client.edit(insert(10, '!'));           // buffered behind it
+  assert.equal(a.client.document, 'abcOFFLINE!');
+
+  b.client.edit(insert(0, 'z'));            // the world moves on
+  assert.equal(server.document, 'zabc');
+
+  // Come back on a new socket, same client, telling the room where it left off.
+  const [freshClient, freshServer] = FakeSocket.pair('a2');
+  attach(a.client, freshClient);
+  room.join('a', freshServer, { revision: a.client.revision });
+  a.client.reconnect();
+
+  assert.equal(server.document, 'zabcOFFLINE!');
+  assert.equal(a.client.document, server.document);
+  assert.equal(b.client.document, server.document);
+  assert.equal(a.client.state, 'synchronized');
+});
+
+test('rejoining past the compaction point is refused and resynced', () => {
+  const { server, room } = makeRoom('abc', { retain: 0 });
+  const a = addClient(room, 'a');
+  a.clientSide.close();
+
+  const b = addClient(room, 'b');
+  b.client.edit(insert(3, 'd'));
+  b.client.edit(insert(4, 'e'));
+  assert.equal(server.baseRevision, 2, 'the only member is current, so history goes');
+
+  const errors = [];
+  a.client.onError = (e) => errors.push(e);
+  const [freshClient, freshServer] = FakeSocket.pair('a2');
+  attach(a.client, freshClient);
+  room.join('a', freshServer, { revision: 0 });
+
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0].code, 'behind-history');
+  assert.equal(a.client.document, 'abcde', 'and it is resynced from the snapshot');
+  assert.equal(a.client.revision, server.revision);
+});
+
+test('the fan-out puts revisions on the wire in order', () => {
+  // The bug this exists for: acknowledging the author before broadcasting to
+  // everybody else. The author promotes its next buffered operation the instant
+  // it is acknowledged, so with a synchronous transport that operation reached
+  // the server and was broadcast *first* — every other client saw revision N+1
+  // before N, then discarded N as a duplicate. One operation lost per
+  // collision, and nothing said so.
+  const { server, room } = makeRoom('abc');
+  const a = addClient(room, 'a');
+  const b = addClient(room, 'b');
+
+  const seen = [];
+  const gaps = [];
+  b.client.onError = (e) => gaps.push(e);
+  const original = b.client.receive.bind(b.client);
+  b.client.receive = (m) => { if (m.type === 'op') seen.push(m.revision); return original(m); };
+
+  // Two edits back to back: the second is buffered behind the first, so the
+  // acknowledgement of the first releases it synchronously.
+  a.client.edit(insert(3, 'X'));
+  a.client.edit(insert(4, 'Y'));
+
+  assert.deepEqual(seen, [1, 2], `b saw revisions ${seen.join(', ')}`);
+  assert.deepEqual(gaps, [], 'no client should have to report a gap');
+  assert.equal(server.document, 'abcXY');
+  assert.equal(b.client.document, server.document);
+  assert.equal(a.client.document, server.document);
+});
+
+test('a client says so rather than applying across missing revisions', () => {
+  const { room } = makeRoom('abc');
+  const a = addClient(room, 'a');
+
+  const errors = [];
+  a.client.onError = (e) => errors.push(e);
+
+  // Revision 3 while holding 0 — two operations never arrived.
+  a.serverSide.send(JSON.stringify({ type: 'op', revision: 3, author: 'b', op: insert(0, 'z') }));
+
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0].code, 'gap');
+  assert.match(errors[0].reason, /2 operation\(s\) missing/);
+  assert.equal(a.client.document, 'abc', 'nothing should have been applied across the gap');
+  assert.equal(a.client.revision, 0);
 });

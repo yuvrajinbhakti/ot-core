@@ -160,6 +160,31 @@ converging on the server's document — and, at every acknowledgement, the clien
 own rebase of its pending operation matching the server's, which is the invariant
 the whole protocol rests on.
 
+## The playground
+
+```bash
+npm run demo     # http://localhost:4180/demo/
+```
+
+Three real `Client`s and a real `Server`, over a wire you can make as bad as you
+like: latency, jitter, duplicate messages, and connections that die. No bundler
+— the page imports `../src` straight, because the library is plain ESM with no
+dependencies and that is worth being able to see rather than being told.
+
+Two modes, and the second is the argument for the first. **Fire the
+counterexample** pushes the same three concurrent edits either way:
+
+```
+with a server        Ana "XYXb"   Bo "XYXb"   Cy "XYXb"     converged
+peer to peer         Ana "XYXb"   Bo "XYXb"   Cy "XXYb"     diverged
+```
+
+Identical edits, identical tie-break rule, two different documents. That is TP2
+missing, live, in one click.
+
+Building it found four things wrong with the library, which is the actual reason
+it exists — see the end of the next section.
+
 ## The client and the server
 
 The algebra above is the hard part and it is not a collaborative editor. What
@@ -220,10 +245,11 @@ has to be transformed past the outstanding operation *and* past every buffered
 one in order, while each of those is rebased past it. Doing only the first half
 looks entirely plausible and works until three people overlap.
 
-### Four bugs this found, and none of them were in the algebra
+### Six bugs this found, and none of them were in the algebra
 
-Written against 30,000 simulated sessions with a deliberately hostile wire.
-Every one of these passed a hand-written example first.
+Four came out of 30,000 simulated sessions with a deliberately hostile wire, and
+two more out of building the playground on top of the result. Every one of them
+passed a hand-written example first.
 
 **A resend must replay the message, not rebuild it.** Between the first send and
 the resend, arriving operations rebase the outstanding operation — so a rebuilt
@@ -248,6 +274,22 @@ refused sat in `awaiting` forever, transforming everybody else's operations
 against something that did not exist. It now drops the unconfirmed work and
 hands it back in `onError({ discarded })` so the application can decide, rather
 than diverging quietly.
+
+**The fan-out must broadcast before it acknowledges.** The author promotes its
+next buffered operation the instant it is acknowledged, so with a synchronous
+transport that operation reached the server and was broadcast *first* — every
+other client saw revision N+1 arrive before N, then discarded N as a duplicate.
+One operation lost per collision, silently. The room now dispatches through a
+queue that cannot be re-entered, and clients report a revision gap as an error
+instead of applying across it.
+
+**A room must not compact history the moment somebody leaves.** Compacting to
+the slowest *connected* member means that the instant a socket dies, the history
+that client will need is gone; it comes back, is told `behind-history`, and is
+resynced from a snapshot that silently discards everything it typed while
+offline. `Room` keeps a retention window past what connected members need,
+because the cost is a few hundred operations and the alternative is losing a
+user's work.
 
 The test harness asserts that a well-formed client is *never* rejected — the
 recovery path exists, and letting it run would hide the next real bug.
@@ -441,7 +483,8 @@ position rather than two.
 ## Testing
 
 ```bash
-npm test     # 85 tests, 920,000 property checks + 55,000 simulated sessions
+npm test     # 89 tests, 920,000 property checks + 55,000 simulated sessions
+npm run demo # the playground, at http://localhost:4180/demo/
 npm run bench
 ```
 

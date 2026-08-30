@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ot-core playground</title>
+<meta name="description" content="Several people editing one document, over a network you can break on purpose.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1><code>ot-core</code> playground</h1>
+    <p>
+      Several people editing one document, over a network you can break on purpose.
+      Every pane below is a real <code>Client</code>; the server is a real
+      <code>Server</code>. Nothing is mocked except the wire, and the wire is
+      only slow because you asked it to be.
+    </p>
+    <p style="margin-top:10px;color:var(--dimmer);font-size:13px;max-width:62ch">
+      There is no &ldquo;drop a message&rdquo; control, because a WebSocket does not
+      lose one. It delivers, or the connection dies &mdash; so that is the
+      failure on offer, and watching a client come back from it is the
+      interesting part.
+    </p>
+  </header>
+
+  <div class="modes" role="group" aria-label="Mode">
+    <button class="mode" id="mode-server" aria-pressed="true">With a server</button>
+    <button class="mode" id="mode-p2p" aria-pressed="false">Peer to peer, no arbiter</button>
+  </div>
+  <p class="mode-note" id="mode-note"></p>
+
+  <div class="controls">
+    <div class="control">
+      <label for="latency">Latency <b id="latency-v">120</b> ms</label>
+      <input type="range" id="latency" min="0" max="1500" step="10" value="120">
+    </div>
+    <div class="control">
+      <label for="jitter">Jitter <b id="jitter-v">60</b> ms</label>
+      <input type="range" id="jitter" min="0" max="1000" step="10" value="60">
+    </div>
+    <div class="control">
+      <label for="flaky">Connection loss <b id="flaky-v">0</b>%</label>
+      <input type="range" id="flaky" min="0" max="30" step="1" value="0">
+    </div>
+    <div class="control">
+      <label for="dupe">Duplicate <b id="dupe-v">0</b>%</label>
+      <input type="range" id="dupe" min="0" max="40" step="1" value="0">
+    </div>
+    <div class="control actions">
+      <button class="act primary" id="collide">Fire the counterexample</button>
+      <button class="act" id="storm">Type at once</button>
+      <button class="act" id="reset">Reset</button>
+    </div>
+  </div>
+
+  <div class="status" id="status" data-state="converged">
+    <span class="dot"></span>
+    <span id="status-text">Everyone agrees.</span>
+    <span class="detail" id="status-detail"></span>
+  </div>
+
+  <section class="server-pane" id="server-pane">
+    <div class="pane-head">
+      <span class="name">Server</span>
+      <span class="badge" id="server-badge">authority</span>
+      <span class="meta" id="server-meta">revision 0 · history 0</span>
+    </div>
+    <div class="doc" id="server-doc"></div>
+  </section>
+
+  <section class="clients" id="clients"></section>
+
+  <div class="log-head">
+    <h2>The wire</h2>
+    <span id="log-note">every message, as it is sent</span>
+  </div>
+  <div class="log" id="log" aria-live="off"></div>
+
+  <footer>
+    Built from <code>ot-core/client</code>, <code>ot-core/server</code> and
+    <code>ot-core/websocket</code>, imported straight from source — no bundler,
+    because the library is plain ESM with no dependencies.
+    <a href="https://github.com/yuvrajinbhakti/ot-core">Source</a>.
+  </footer>
+
+</div>
+<script type="module" src="playground.js"></script>
+</body>
+</html>

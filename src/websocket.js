@@ -15,7 +15,7 @@
  */
 
 import { Client } from './client.js';
-import { encode, decodeClientMessage, decodeServerMessage, error, ERRORS } from './protocol.js';
+import { encode, decodeClientMessage, decodeServerMessage, error, serverOp, ERRORS } from './protocol.js';
 
 /**
  * @typedef {{
@@ -49,30 +49,22 @@ const asText = (data) =>
   typeof data === 'string' ? data : new TextDecoder().decode(data);
 
 /**
- * Wire a socket to a new `Client`.
+ * Point an existing `Client` at a socket.
  *
- * The document arrives from the server as `init`, so the client starts empty
- * and fills in. Anything typed before then is not lost — it goes through the
- * state machine like any other edit — but it will be rebased onto whatever the
- * server actually has, which is rarely what a user expects. Wait for
- * `onReady` before letting anyone type.
+ * Separate from `connect` because a reconnect needs it: the socket is new, the
+ * client is not. Building the playground is what surfaced that — `connect`
+ * always made a fresh `Client`, so coming back from offline meant throwing away
+ * the buffered edits that were the entire reason the client had state.
  *
+ * @param {Client} client
  * @param {SocketLike} socket
- * @param {object} options
- * @param {string} options.id
- * @param {(op: import('./operation.js').Operation) => void} [options.onRemote]
- * @param {(client: Client) => void} [options.onChange]  after anything moves
- * @param {(client: Client) => void} [options.onReady]   after `init` arrives
- * @param {(e: { code: string, reason: string, discarded?: unknown[] }) => void} [options.onError]
- * @returns {Client}
+ * @param {object} [options]
+ * @param {(client: Client) => void} [options.onChange]
+ * @param {(client: Client) => void} [options.onReady]  after `init` arrives
+ * @returns {Client} the same client
  */
-export function connect(socket, { id, onRemote, onChange, onReady, onError } = {}) {
-  const client = new Client({
-    id,
-    send: (message) => socket.send(encode(message)),
-    onRemote,
-    onError,
-  });
+export function attach(client, socket, { onChange, onReady } = {}) {
+  client.send = (message) => socket.send(encode(message));
 
   listen(socket, 'message', (data) => {
     let message;
@@ -94,6 +86,29 @@ export function connect(socket, { id, onRemote, onChange, onReady, onError } = {
 }
 
 /**
+ * Wire a socket to a new `Client`.
+ *
+ * The document arrives from the server as `init`, so the client starts empty
+ * and fills in. Anything typed before then is not lost — it goes through the
+ * state machine like any other edit — but it will be rebased onto whatever the
+ * server actually has, which is rarely what a user expects. Wait for `onReady`
+ * before letting anyone type.
+ *
+ * @param {SocketLike} socket
+ * @param {object} options
+ * @param {string} options.id
+ * @param {(op: import('./operation.js').Operation) => void} [options.onRemote]
+ * @param {(client: Client) => void} [options.onChange]  after anything moves
+ * @param {(client: Client) => void} [options.onReady]   after `init` arrives
+ * @param {(e: { code: string, reason: string, discarded?: unknown[] }) => void} [options.onError]
+ * @returns {Client}
+ */
+export function connect(socket, { id, onRemote, onChange, onReady, onError } = {}) {
+  const client = new Client({ id, send: () => {}, onRemote, onError });
+  return attach(client, socket, { onChange, onReady });
+}
+
+/**
  * A room: one `Server`, several sockets, and the fan-out between them.
  *
  * Deliberately not a `Server` subclass. The server is a pure state machine that
@@ -109,24 +124,71 @@ export class Room {
    *   catches up. Rebasing is linear in history depth — 22µs at a thousand
    *   entries against 0.016µs at one — so a room that never compacts gets
    *   slower for as long as it stays open.
+   * @param {number} [options.retain=200]
+   *   Revisions to keep *beyond* what connected members need, so a client that
+   *   drops can rejoin where it left off.
+   *
+   *   This is not a tuning knob, it is the difference between a working
+   *   reconnect and a user losing everything they typed on a train. Compacting
+   *   to the slowest *connected* member means the instant somebody's socket
+   *   dies, the history they will need is gone; they come back, get told
+   *   `behind-history`, and are resynced from a snapshot that silently discards
+   *   the edits the state machine was holding for exactly this moment. Keeping
+   *   a couple of hundred operations costs almost nothing and buys the entire
+   *   offline story.
    */
-  constructor(server, { compact = true } = {}) {
+  constructor(server, { compact = true, retain = 200 } = {}) {
     this.server = server;
     this.autoCompact = compact;
+    this.retain = retain;
     /** @type {Map<string, { socket: SocketLike, revision: number }>} */
     this.members = new Map();
+    /** @type {Array<[string, unknown]>} messages waiting behind a synchronous send */
+    this.pending = [];
+    this.draining = false;
   }
 
   /**
    * @param {string} clientId
    * @param {SocketLike} socket
+   * @param {object} [options]
+   * @param {number} [options.revision]
+   *   For a client that is coming back rather than arriving. Given one, the room
+   *   sends the operations it missed instead of a fresh `init` — which would
+   *   otherwise reset its document and discard the edits it made while offline,
+   *   the exact work the state machine held on to.
    */
-  join(clientId, socket) {
+  join(clientId, socket, { revision } = {}) {
     if (this.members.has(clientId)) {
       throw new Error(`client ${clientId} is already in this room`);
     }
-    this.members.set(clientId, { socket, revision: this.server.revision });
-    socket.send(encode(this.server.snapshot()));
+
+    if (revision === undefined) {
+      this.members.set(clientId, { socket, revision: this.server.revision });
+      socket.send(encode(this.server.snapshot()));
+    } else {
+      let missed;
+      try {
+        missed = this.server.since(revision);
+      } catch (cause) {
+        // Compacted past what this client is holding. It has to start over, and
+        // saying so is better than sending it a document it cannot reconcile.
+        socket.send(encode(error(ERRORS.BEHIND_HISTORY, cause.message)));
+        this.members.set(clientId, { socket, revision: this.server.revision });
+        socket.send(encode(this.server.snapshot()));
+        this.#listen(clientId, socket);
+        return;
+      }
+      this.members.set(clientId, { socket, revision });
+      for (const entry of missed) {
+        socket.send(encode(serverOp(entry.revision, entry.op, entry.author)));
+      }
+    }
+
+    this.#listen(clientId, socket);
+  }
+
+  #listen(clientId, socket) {
 
     listen(socket, 'message', (data) => {
       let message;
@@ -152,13 +214,35 @@ export class Room {
   }
 
   #handle(clientId, message) {
+    // Never re-enter. `send` can be synchronous — an in-process transport, a
+    // test double, or application code that edits from an onChange handler —
+    // and a nested call would interleave one operation's fan-out with the
+    // next's, putting revisions on the wire out of order.
+    this.pending.push([clientId, message]);
+    if (this.draining) return;
+    this.draining = true;
+    try {
+      while (this.pending.length > 0) {
+        const [id, m] = this.pending.shift();
+        this.#dispatch(id, m);
+      }
+    } finally {
+      this.draining = false;
+    }
+  }
+
+  #dispatch(clientId, message) {
     const member = this.members.get(clientId);
     if (!member) return;   // raced with a close
 
     const { ack, broadcast } = this.server.receive(clientId, message);
-    member.socket.send(encode(ack));
-    if (ack.type === 'ack') member.revision = ack.revision;
 
+    // Everybody else first, the author second. Acknowledging first was a real
+    // bug: the author promotes its next buffered operation the moment it is
+    // acknowledged, so with a synchronous transport that operation reached the
+    // server and was broadcast *before* this one — and every other client saw
+    // revision N+1 arrive ahead of revision N, then discarded N as a duplicate.
+    // One operation lost per collision, silently.
     if (broadcast) {
       const payload = encode(broadcast);
       for (const [id, other] of this.members) {
@@ -171,19 +255,24 @@ export class Room {
         other.revision = broadcast.revision;
       }
     }
+
+    member.socket.send(encode(ack));
+    if (ack.type === 'ack') member.revision = ack.revision;
+
     this.#compact();
   }
 
   #compact() {
     if (!this.autoCompact) return;
-    if (this.members.size === 0) {
-      // Nobody left to catch up. Keeping history for a client that may never
-      // return is what makes an idle room expensive.
-      this.server.compact(this.server.revision);
-      return;
-    }
-    let lowest = Infinity;
+
+    let lowest = this.server.revision;
     for (const member of this.members.values()) lowest = Math.min(lowest, member.revision);
-    this.server.compact(lowest);
+
+    // Never past the retention window, whoever is connected — including nobody.
+    // An empty room is the *most* likely to see a reconnect, not the least.
+    // Clamped at zero: early in a room's life the retention window reaches
+    // back past the beginning, and `compact` quite rightly refuses a negative
+    // revision rather than guessing what was meant.
+    this.server.compact(Math.max(0, Math.min(lowest, this.server.revision - this.retain)));
   }
 }

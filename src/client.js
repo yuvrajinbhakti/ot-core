@@ -193,6 +193,20 @@ export class Client {
         // nothing downstream can tell that from an OT bug. The revision number
         // is already on the message; this is free.
         if (m.revision <= this.revision) return;
+        // A revision from the future means operations went missing, and there
+        // is no rebasing across an operation you never saw — every subsequent
+        // transform would be against the wrong history. Applying it anyway is
+        // how a document ends up quietly wrong, so this is an error rather than
+        // a best effort. It also caught a real ordering bug in the room's
+        // fan-out that had been silently losing an operation per collision.
+        if (m.revision > this.revision + 1) {
+          this.onError({
+            code: ERRORS.GAP,
+            reason: `received revision ${m.revision} while holding ${this.revision}; ` +
+              `${m.revision - this.revision - 1} operation(s) missing`,
+          });
+          return;
+        }
         this.#applyRemote(m.op);
         this.revision = m.revision;
         return;
