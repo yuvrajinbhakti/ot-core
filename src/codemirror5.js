@@ -246,6 +246,20 @@ export function collaborate(cm, client) {
     if (applying) return;
     // Ours coming back, or somebody else's binding on the same editor.
     if (changes.every((c) => c.origin === REMOTE_ORIGIN)) return;
+    // `setValue` replaces the entire document, and CodeMirror marks it. It is
+    // never a collaborative edit — it is initialisation, or a reset — and
+    // translating it into "delete everything, then insert everything" sends an
+    // operation that wipes the document for every other participant.
+    //
+    // This is defence rather than theory. Binding an editor and then calling
+    // setValue on it emptied a live room during this library's own integration,
+    // because the application initialised twice and the second initialisation
+    // ran while the binding was attached. If you mean to replace the document
+    // collaboratively, use `client.editText(text)`, which diffs it.
+    if (changes.some((c) => c.origin === 'setValue')) {
+      before = instance.getValue();
+      return;
+    }
 
     for (const op of operationsFromChanges(before, changes)) client.edit(op);
     before = instance.getValue();
