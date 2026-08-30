@@ -262,6 +262,41 @@ test('an edit whose origin is ours alone is ignored on the way out', () => {
   assert.equal(sends, 0);
 });
 
+test('a setValue is not sent as an edit', () => {
+  // Replacing the whole document is initialisation, not a collaborative edit.
+  // Translating it into delete-everything-then-insert-everything sends an
+  // operation that empties the document for every other participant — which is
+  // exactly what happened when this library was first wired into a real app.
+  let sends = 0;
+  const client = new Client({ id: 'me', send: () => sends++, document: 'abc' });
+  const cm = fakeEditor('abc');
+  collaborate(cm, client);
+
+  cm.replaceRange('totally different', { line: 0, ch: 0 }, { line: 0, ch: 3 }, 'setValue');
+
+  assert.equal(sends, 0, 'a setValue was sent to the server as an operation');
+  assert.equal(client.document, 'abc', 'a setValue was applied as a local edit');
+});
+
+test('a normal edit after a setValue is still sent, from the new text', () => {
+  // The guard must not desynchronise the pre-image it keeps, or the next real
+  // keystroke is computed against a document that no longer exists.
+  const sent = [];
+  const client = new Client({ id: 'me', send: (m) => sent.push(m), document: 'abc' });
+  const cm = fakeEditor('abc');
+  collaborate(cm, client);
+
+  cm.replaceRange('xyz', { line: 0, ch: 0 }, { line: 0, ch: 3 }, 'setValue');
+  cm.replaceRange('Q', { line: 0, ch: 1 }, { line: 0, ch: 1 }, '+input');
+
+  assert.equal(cm.getValue(), 'xQyz');
+  assert.equal(sent.length, 1, 'the real keystroke was not sent');
+  assert.deepEqual(
+    { type: sent[0].op.type, position: sent[0].op.position, content: sent[0].op.content },
+    { type: 'insert', position: 1, content: 'Q' }
+  );
+});
+
 test('detaching restores the previous handler and stops listening', () => {
   const client = new Client({ id: 'me', send: () => {}, document: 'abc' });
   const previous = () => {};
