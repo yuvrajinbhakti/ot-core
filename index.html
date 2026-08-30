@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ot-core</title>
+<meta name="description" content="Operational Transform for plain text, with the convergence property actually tested.">
+<link rel="stylesheet" href="demo/style.css">
+<!--
+  A landing page, because Pages serves this directory and `.nojekyll` means
+  nothing generates one. Before that file existed Jekyll rendered README.md
+  here; turning Jekyll off is worth it — what is in the repo is then exactly
+  what is served, and no future brace in an HTML file can silently break the
+  build — but it left this URL a 404, which is worse than either.
+-->
+</head>
+<body>
+<div class="wrap" style="max-width:44rem">
+
+  <header>
+    <h1><code>ot-core</code></h1>
+    <p>
+      Operational Transform for plain text, with the convergence property
+      actually tested. Zero dependencies, ESM, about 30&nbsp;kB.
+    </p>
+  </header>
+
+  <div class="modes" style="margin-top:28px">
+    <a class="mode" href="demo/" style="text-decoration:none">Open the playground</a>
+    <a class="mode" href="https://github.com/yuvrajinbhakti/ot-core" style="text-decoration:none">Source on GitHub</a>
+    <a class="mode" href="https://www.npmjs.com/package/ot-core" style="text-decoration:none">npm</a>
+  </div>
+
+  <p style="color:var(--dim);margin-top:28px">
+    I wrote an OT implementation, load-tested it to 1,000 concurrent clients, and
+    shipped it. Then I property-tested the one law it exists to uphold and
+    <b style="color:var(--ink)">16.2% of concurrent edit pairs diverged</b>. This
+    is that implementation with the bugs found and fixed — and the test suite is
+    the point of it.
+  </p>
+
+  <p style="color:var(--dimmer);font-size:13px">
+    The playground is three real clients and a real server over a network you can
+    break on purpose. Its second mode takes the server away, which is enough to
+    make the same three edits land on two different documents.
+  </p>
+
+</div>
+</body>
+</html>
