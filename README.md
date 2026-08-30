@@ -160,6 +160,124 @@ converging on the server's document — and, at every acknowledgement, the clien
 own rebase of its pending operation matching the server's, which is the invariant
 the whole protocol rests on.
 
+## The client and the server
+
+The algebra above is the hard part and it is not a collaborative editor. What
+was missing was everything between two people's keyboards: who holds an edit
+while an earlier one is in flight, what happens to a socket that drops after the
+server accepted an edit but before the acknowledgement got home, and what a
+client does with the four hundred milliseconds of typing it did while offline.
+
+Those ship now, as subpaths of the same package.
+
+```js
+// browser
+import { connect } from 'ot-core/websocket';
+
+const client = connect(new WebSocket(url), {
+  id: myUserId,
+  onReady: () => textarea.removeAttribute('disabled'),
+  onChange: (c) => { textarea.value = c.document; },
+});
+
+textarea.addEventListener('input', () => client.editText(textarea.value));
+```
+
+```js
+// server
+import { Server } from 'ot-core/server';
+import { Room } from 'ot-core/websocket';
+
+const room = new Room(new Server({ document: load(docId) }));
+wss.on('connection', (socket, request) => room.join(userIdFrom(request), socket));
+```
+
+### One package, four entry points
+
+Not four packages, and the reason is specific to this problem rather than a
+preference. A client and a server running different versions of `transform`
+diverge silently — no error, no crash, two documents that drift apart over an
+hour and cannot be reconciled afterwards. Four packages with independent version
+ranges make that a thing a lockfile can do to you. One package makes it
+impossible. Subpaths tree-shake identically: `ot-core/websocket` in a browser
+bundle does not drag the server in.
+
+### What the client actually does
+
+```
+synchronized ──edit──► awaiting ──edit──► awaiting-with-buffer
+     ▲                    │                        │
+     └────────ack─────────┘                        │
+     ▲                    ▲───────ack──────────────┘
+```
+
+One operation on the wire at a time. Edits made while waiting go into a buffer
+and are composed as they arrive, so a burst of typing that spans a round trip
+leaves as one message rather than twelve.
+
+The third state is where the bodies are. An operation arriving from the server
+has to be transformed past the outstanding operation *and* past every buffered
+one in order, while each of those is rebased past it. Doing only the first half
+looks entirely plausible and works until three people overlap.
+
+### Four bugs this found, and none of them were in the algebra
+
+Written against 30,000 simulated sessions with a deliberately hostile wire.
+Every one of these passed a hand-written example first.
+
+**A resend must replay the message, not rebuild it.** Between the first send and
+the resend, arriving operations rebase the outstanding operation — so a rebuilt
+message carries a *different operation under the same sequence number*. The
+server applies one and deduplicates the other, and the two sides disagree about
+which, permanently. Messages are immutable; the server rebases from the revision
+the message carries.
+
+**Reconnecting must not transmit mid-catch-up.** Recognising your own operation
+in the history you missed and promoting the next buffered one is right; sending
+it there is not, because the rest of the missed history has not rebased it yet.
+Same failure as above, reached from the other direction.
+
+**A client must ignore operations it already has.** A reconnecting client
+catches up through `since()`, and a broadcast of one of those revisions can
+still be in flight. Applying it twice inserts the text twice, permanently, and
+nothing downstream can tell that from an OT bug. The revision is already on the
+message, so the check is free.
+
+**A rejected operation has to be let go of.** A client whose edit the server
+refused sat in `awaiting` forever, transforming everybody else's operations
+against something that did not exist. It now drops the unconfirmed work and
+hands it back in `onError({ discarded })` so the application can decide, rather
+than diverging quietly.
+
+The test harness asserts that a well-formed client is *never* rejected — the
+recovery path exists, and letting it run would hide the next real bug.
+
+### Offline
+
+Falls out of the state machine rather than being a feature bolted to it.
+`disconnect()` stops sending; edits keep applying locally and accumulating.
+`reconnect(server.since(client.revision))` catches up and pushes.
+
+```js
+client.disconnect();
+client.editText('...typed on a train...');
+client.reconnect(await fetchMissedOperations(client.revision));
+```
+
+The resend is unconditional, because from the client's side "the acknowledgement
+never arrived" and "the edit never arrived" are the same observation. The `seq`
+on the message is what lets the server tell them apart.
+
+### Compaction
+
+Rebasing is linear in history depth — 0.016µs against one operation, 22µs
+against a thousand — so a room that never drops history gets slower for as long
+as it stays open. `Room` compacts to the slowest member still connected;
+`Server.compact(revision)` is there if you are managing membership yourself. A
+client behind the compaction point is told `behind-history` and has to rejoin,
+which is a real answer rather than a wrong document.
+
+
 ### Choosing a side
 
 `side` must be `'left'` for one participant and `'right'` for the other, and
@@ -305,13 +423,25 @@ compact.
 | `whyInvalid(op, docLength?)`        | the reason it is not, or `null`                           |
 | `assertValid(op, docLength?)`       | the same, but throws                                      |
 
+From `ot-core/client`, `ot-core/server`, `ot-core/websocket` and
+`ot-core/protocol`:
+
+| export                              | does                                                      |
+| ----------------------------------- | --------------------------------------------------------- |
+| `Client`                            | the three-state client, buffering and rebasing             |
+| `Server`                            | the authority: orders operations, rebases late ones        |
+| `connect(socket, options)`          | a `Client` wired to a WebSocket-shaped thing               |
+| `Room(server)`                      | a `Server` plus fan-out, membership and compaction         |
+| `encode` / `decodeClientMessage`    | JSON with the validation a bare parse leaves to chance     |
+| `ERRORS`                            | rejection codes a client has to branch on                  |
+
 Positions count Unicode code points, not UTF-16 units, so an emoji is one
 position rather than two.
 
 ## Testing
 
 ```bash
-npm test     # 65 tests, 920,000 property checks + 25,000 simulated sessions
+npm test     # 85 tests, 920,000 property checks + 55,000 simulated sessions
 npm run bench
 ```
 

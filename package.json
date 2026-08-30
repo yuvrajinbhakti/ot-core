@@ -1,19 +1,35 @@
 {
   "name": "ot-core",
-  "version": "1.1.0",
-  "description": "Operational Transform for plain text, with the convergence property actually tested.",
+  "version": "1.2.0",
+  "description": "Operational Transform for plain text: the algebra, a client state machine, a server, and a transport \u2014 with convergence actually tested.",
   "type": "module",
   "main": "./src/index.js",
   "exports": {
     ".": {
       "types": "./index.d.ts",
       "import": "./src/index.js"
+    },
+    "./client": {
+      "types": "./client.d.ts",
+      "import": "./src/client.js"
+    },
+    "./server": {
+      "types": "./server.d.ts",
+      "import": "./src/server.js"
+    },
+    "./protocol": {
+      "types": "./protocol.d.ts",
+      "import": "./src/protocol.js"
+    },
+    "./websocket": {
+      "types": "./websocket.d.ts",
+      "import": "./src/websocket.js"
     }
   },
   "types": "./index.d.ts",
   "files": [
     "src",
-    "index.d.ts",
+    "*.d.ts",
     "README.md",
     "LICENSE"
   ],
