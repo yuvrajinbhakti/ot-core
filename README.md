@@ -3,6 +3,7 @@
 [![test](https://github.com/yuvrajinbhakti/ot-core/actions/workflows/test.yml/badge.svg)](https://github.com/yuvrajinbhakti/ot-core/actions/workflows/test.yml)
 [![npm](https://img.shields.io/npm/v/ot-core.svg)](https://www.npmjs.com/package/ot-core)
 [![zero dependencies](https://img.shields.io/badge/dependencies-0-brightgreen.svg)](package.json)
+[![playground](https://img.shields.io/badge/playground-live-60a5fa.svg)](https://yuvrajinbhakti.github.io/ot-core/demo/)
 
 Operational Transform for plain text, with the convergence property actually
 tested.
@@ -161,6 +162,8 @@ own rebase of its pending operation matching the server's, which is the invarian
 the whole protocol rests on.
 
 ## The playground
+
+**[yuvrajinbhakti.github.io/ot-core/demo](https://yuvrajinbhakti.github.io/ot-core/demo/)**, or locally:
 
 ```bash
 npm run demo     # http://localhost:4180/demo/
