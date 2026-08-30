@@ -10,6 +10,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { insert } from '../src/index.js';
 import { Server } from '../src/server.js';
+import { Client } from '../src/client.js';
 import { connect, attach, Room } from '../src/websocket.js';
 
 /** A WebSocket-shaped object wired directly to a partner. */
@@ -333,4 +334,74 @@ test('a client says so rather than applying across missing revisions', () => {
   assert.match(errors[0].reason, /2 operation\(s\) missing/);
   assert.equal(a.client.document, 'abc', 'nothing should have been applied across the gap');
   assert.equal(a.client.revision, 0);
+});
+
+/* ---------------------------------------------------------------------------
+ * Three bugs that real sockets found. Reproduced with fakes now that the shape
+ * is known, so they stay caught on a machine with no devDependencies installed.
+ * ------------------------------------------------------------------------- */
+
+test('the server remembers a client through a disconnect, so a resend is not applied twice', () => {
+  // `Room.leave` used to call `server.forget`, throwing away the sequence
+  // number at the exact moment it was about to matter.
+  const { server, room } = makeRoom('abc');
+  const a = addClient(room, 'a');
+
+  a.client.edit(insert(3, 'XYZ'));
+  assert.equal(server.document, 'abcXYZ');
+  assert.equal(server.revision, 1);
+
+  // The socket dies. The acknowledgement did arrive here, but the point is the
+  // server's memory of the sequence number, which must outlive the connection.
+  a.clientSide.close();
+  assert.equal(room.members.size, 0);
+  assert.ok(server.seen.has('a'), 'the server must still know what a has sent');
+
+  // Replay the exact message a resend would carry.
+  const replayed = server.receive('a', { type: 'op', revision: 0, seq: 1, op: insert(3, 'XYZ') });
+  assert.equal(replayed.applied, false);
+  assert.equal(replayed.ack.type, 'ack');
+  assert.equal(server.document, 'abcXYZ', 'the text must not be inserted twice');
+  assert.equal(server.revision, 1);
+});
+
+test('a client ignores its own operation arriving as history', () => {
+  // On a rejoin the server sends everything after the client's revision, and
+  // the client's own unacknowledged edit is among it. `reconnect(missed)` knew
+  // to treat that as the acknowledgement; the path where the same operations
+  // arrive as socket messages did not, and applied it as a remote edit —
+  // inserting the text a second time on that client only.
+  const client = new Client({ id: 'a', document: 'abc', send: () => {} });
+  client.edit(insert(3, 'XYZ'));
+  assert.equal(client.document, 'abcXYZ');
+  assert.equal(client.state, 'awaiting');
+
+  client.receive({ type: 'op', revision: 1, author: 'a', op: insert(3, 'XYZ') });
+
+  assert.equal(client.document, 'abcXYZ', 'its own operation must not be applied twice');
+  assert.equal(client.revision, 1);
+  assert.equal(client.state, 'synchronized', 'and it counts as the acknowledgement');
+});
+
+test('a client refuses an acknowledgement that skips a revision', () => {
+  // If the ack advances past operations this client never saw, its next
+  // buffered edit would be sent claiming a baseline it never had, and the
+  // server would rebase it from the wrong place. One character, one position
+  // early, no complaint.
+  const errors = [];
+  const client = new Client({
+    id: 'a', document: 'abc', send: () => {}, onError: (e) => errors.push(e),
+  });
+  client.edit(insert(3, 'X'));
+  client.edit(insert(4, 'Y'));           // buffered behind it
+  assert.equal(client.state, 'awaiting-with-buffer');
+
+  // Acknowledged at revision 3 while holding 0 — two operations never arrived.
+  client.receive({ type: 'ack', revision: 3, seq: 1 });
+
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0].code, 'gap');
+  assert.match(errors[0].reason, /2 operation\(s\) never arrived/);
+  assert.equal(errors[0].discarded.length, 2, 'the unsent work comes back to the application');
+  assert.equal(client.state, 'synchronized', 'and it stops pretending to be in sync');
 });

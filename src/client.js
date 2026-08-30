@@ -175,6 +175,28 @@ export class Client {
         // Ignore an acknowledgement for something we are not waiting on — a
         // duplicate delivery, or one that crossed a reconnect.
         if (this.outstanding === null || m.seq !== this.seq) return;
+        // An acknowledgement lands at exactly one past where this client is,
+        // because everything the server accepted in between reaches it first on
+        // the same socket. More than that means operations went missing, and
+        // taking the revision anyway is silent corruption: the next buffered
+        // edit would be sent claiming a baseline this client never had, and the
+        // server would rebase it from the wrong place. Found exactly that way —
+        // a reconnect whose missed operations were sent before the new socket
+        // had a listener, after which one buffered character landed a position
+        // early and nothing complained.
+        if (m.revision > this.revision + 1) {
+          const discarded = this.unconfirmed;
+          this.outstanding = null;
+          this.inFlight = null;
+          this.buffer = [];
+          this.onError({
+            code: ERRORS.GAP,
+            reason: `acknowledged at revision ${m.revision} while holding ${this.revision}; ` +
+              `${m.revision - this.revision - 1} operation(s) never arrived`,
+            discarded,
+          });
+          return;
+        }
         // Never backwards. A deduplicated acknowledgement carries the revision
         // the operation originally landed at, which can be behind where this
         // client has since caught up to.
@@ -185,6 +207,23 @@ export class Client {
         return;
 
       case 'op':
+        // Our own operation, arriving as history rather than as an
+        // acknowledgement. That happens on a rejoin: the client asks for
+        // everything after revision R, and its own unacknowledged edit is among
+        // it. Applying that as though somebody else had written it inserts the
+        // text a second time — which is what it did, and only a real socket
+        // showed it, because `reconnect(missed)` had this check and the path
+        // where the same operations arrive as messages did not.
+        if (m.author === this.id) {
+          this.revision = Math.max(this.revision, m.revision);
+          if (this.outstanding !== null) {
+            this.outstanding = null;
+            this.inFlight = null;
+            if (this.buffer.length > 0) this.#promote(this.buffer.shift());
+          }
+          return;
+        }
+
         // Already have it. A client that reconnects catches up through
         // `since()`, and a broadcast of one of those same revisions can still
         // be in flight — the socket is gone, but a proxy, a buffered write or a
