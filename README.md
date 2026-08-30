@@ -238,6 +238,30 @@ nothing back.
 Nothing else in the package imports them, so `ot-core` is still zero-dependency
 for anybody who does not import this file.
 
+### CodeMirror 5
+
+```js
+import { collaborate } from 'ot-core/codemirror5';
+
+const detach = collaborate(cm, client);
+```
+
+A separate module rather than a flag, because the two versions report changes in
+different coordinate systems and sharing the code would mean a branch in the one
+function where a mistake is invisible. CodeMirror 6's `iterChanges` gives every
+change against the document as it was *before* the transaction, so converting it
+needs a running offset. CodeMirror 5 pushes a change object as each change is
+applied, so every entry after the first is already in the coordinates the
+previous ones left — sequential, not simultaneous.
+
+Carrying version 6's running offset across to version 5 therefore double-counts,
+and only when a batch produces more than one change: one cursor is always right,
+two are always wrong. It is exactly the class of bug that ships.
+
+Version 5 has no transaction annotations either, so the echo is suppressed with
+a distinguished `origin` on remote changes instead. `codemirror` is an optional
+peer dependency alongside the version 6 packages.
+
 ## The client and the server
 
 The algebra above is the hard part and it is not a collaborative editor. What
@@ -270,13 +294,13 @@ const room = new Room(new Server({ document: load(docId) }));
 wss.on('connection', (socket, request) => room.join(userIdFrom(request), socket));
 ```
 
-### One package, four entry points
+### One package, seven entry points
 
-Not four packages, and the reason is specific to this problem rather than a
+Not seven packages, and the reason is specific to this problem rather than a
 preference. A client and a server running different versions of `transform`
 diverge silently — no error, no crash, two documents that drift apart over an
-hour and cannot be reconciled afterwards. Four packages with independent version
-ranges make that a thing a lockfile can do to you. One package makes it
+hour and cannot be reconciled afterwards. Separate packages with independent
+version ranges make that a thing a lockfile can do to you. One package makes it
 impossible. Subpaths tree-shake identically: `ot-core/websocket` in a browser
 bundle does not drag the server in.
 
@@ -437,6 +461,40 @@ falls *outside* the selection. The intuitive-looking choice — leaning both end
 inward — makes a selection silently grow to cover whatever a collaborator types
 at its edges.
 
+### Other people's cursors
+
+`ot-core/presence` is the same arithmetic applied to everybody else, plus the
+bookkeeping that makes it usable:
+
+```js
+import { Presence, track } from 'ot-core/presence';
+
+const presence = new Presence({ onChange: (peers) => draw(peers) });
+track(client, presence);
+
+socket.on('cursor', ({ id, selection, revision, name }) =>
+  presence.see(id, selection, { revision, meta: { name } })
+);
+```
+
+It is a data structure and the transforms, **not a transport**. Presence is
+ephemeral, high-frequency and tolerant of loss; operations are none of those,
+and putting cursors through the operation channel means an unordered droppable
+message class inside a state machine built to never drop or reorder anything.
+Send cursors however you like — a second socket event is fine — and hand what
+arrives to `see`.
+
+Two details it gets right that naive implementations usually do not. A report
+carries the revision it was true at, and is transformed forward through exactly
+the operations it missed, so cursors do not drift when people type quickly. And
+it is rebased past *your* unacknowledged edits too, because the peer wrote that
+position against a document that does not contain them.
+
+One window stays open, and it is documented rather than hidden: an operation of
+your own that has just been acknowledged is in neither the history ring nor your
+pending edits, so a report stamped before that acknowledgement is not rebased
+past it. It is one round trip wide and closes on the peer's next report.
+
 ### Batching and undo
 
 Five keystrokes are five operations on the wire, five entries in the history
@@ -457,19 +515,33 @@ separate and drops anything that cancels out entirely, so typing a word and
 deleting it again produces nothing to send.
 
 Undo is `invert`, and then the same transform as everything else, because by the
-time somebody presses Ctrl-Z other people have edited:
+time somebody presses Ctrl-Z other people have edited. `ot-core/undo` does the
+bookkeeping:
 
 ```js
-import { invert, transformAgainst } from 'ot-core';
+import { attachHistory } from 'ot-core/undo';
 
-const inverse = invert(myOperation, documentBeforeIt);
-const undo = transformAgainst(inverse, everythingSince, 'left');
+const history = attachHistory(client);
+undoButton.onclick = () => history.undo();
+redoButton.onclick = () => history.redo();
 ```
 
-One thing to expect: if somebody has already deleted across the text you typed,
-your undo correctly does nothing. Undo here means "remove what is left of my
-contribution", not "recompute history as though I never typed" — the second is
-exclusion transformation, and this library does not do it.
+It records every local edit, rebases both stacks past every remote operation,
+and drops entries that other people's edits have flattened to nothing — because
+an undo button that visibly does nothing reads as broken.
+
+Two things to expect. If somebody has already deleted across the text you typed,
+your undo correctly does nothing and skips to the next real entry: undo here
+means "remove what is left of my contribution", not "recompute history as though
+I never typed" — the second is exclusion transformation, and this library does
+not do it.
+
+And if somebody types *inside* a run of text you inserted, undoing your insert
+removes their characters too. That is the trade-off below arriving somewhere you
+can feel it: your undo is a delete, their text is inside it, and `transform`
+resolves that by letting the delete swallow the insert. Splitting the delete
+around foreign text is the better behaviour and a larger change than this
+module; until then it is asserted in the tests so it cannot drift silently.
 
 ### Operations off the network
 
@@ -519,6 +591,37 @@ Rebasing is linear in history depth. A single transform is never the
 bottleneck; letting a room accumulate unbounded history is. Acknowledge and
 compact.
 
+That measures the algebra, which was never the problem — nine bugs were found in
+this library and none of them were in `transform`. The second benchmark measures
+the layer they were actually in:
+
+```
+Client   receive with   0 buffered    4.242 µs      235,000 ops/sec
+Client   receive with 100 buffered    6.721 µs      148,000 ops/sec
+Server   written   0 revisions behind 4.905 µs      203,000 ops/sec
+Server   written 100 revisions behind 7.370 µs      135,000 ops/sec
+Presence  10 peers, one operation     0.172 µs    5,816,000 ops/sec
+Presence 200 peers, one operation     1.659 µs      602,000 ops/sec
+Undo     stack of   1                 0.115 µs    8,701,000 ops/sec
+Undo     stack of 200                 8.864 µs      112,000 ops/sec
+End-to-end  2 clients in a room      12.349 µs       80,000 ops/sec
+End-to-end 20 clients in a room      77.325 µs       12,900 ops/sec
+```
+
+Nothing there is flat. The steepest curve is undo, roughly 75× from a stack of
+one to a stack of two hundred, because every remote operation rebases the whole
+stack — so `limit` is a throughput setting and not only a memory one. A room
+costs about 4 µs per additional participant on the fan-out, which is thousands
+of edits a second before the network is involved. The network is what you will
+actually run out of.
+
+These are single-core numbers with no network, so they are an upper bound and a
+shape rather than a capacity plan. They are also measured in short batches
+against freshly built state: every insert makes the document longer and `apply`
+copies it, so a straight loop measures string copying instead of the thing
+under test. The first version of that benchmark did exactly that and never
+finished.
+
 ## API
 
 | export                              | does                                                     |
@@ -542,6 +645,15 @@ compact.
 | `assertValid(op, docLength?)`       | the same, but throws                                      |
 | `collaborate(client)`               | a CodeMirror extension bound to a client                  |
 
+From `ot-core/presence` and `ot-core/undo`:
+
+| export                              | does                                                      |
+| ----------------------------------- | --------------------------------------------------------- |
+| `Presence`                          | where everybody's cursor is, moved as the document changes |
+| `track(client, presence)`           | keep a `Presence` in step with a `Client`                  |
+| `UndoStack`                         | inverses, rebased past everything that happened since      |
+| `attachHistory(client)`             | an undo/redo pair wired to a client                        |
+
 From `ot-core/client`, `ot-core/server`, `ot-core/websocket` and
 `ot-core/protocol`:
 
@@ -560,9 +672,9 @@ position rather than two.
 ## Testing
 
 ```bash
-npm test     # 110 tests, 1,020,000 property checks + 55,000 simulated sessions
+npm test     # 155 tests, over a million property checks + 55,000 simulated sessions
 npm run demo # the playground, at http://localhost:4180/demo/
-npm run bench
+npm run bench # the algebra, and then the layer the bugs were actually in
 ```
 
 Six of those run over a real WebSocket — `ws` is the only devDependency, and the

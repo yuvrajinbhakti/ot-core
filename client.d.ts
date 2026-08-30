@@ -29,6 +29,12 @@ export class Client {
     document?: string;
     revision?: number;
     onRemote?: (op: Operation) => void;
+    /**
+     * An edit this client just made, with the document as it was immediately
+     * before it. `before` is there because a delete does not carry the text it
+     * removed, so an undo stack cannot reconstruct it from the result.
+     */
+    onLocal?: (op: Operation, before: string) => void;
     onError?: (e: ClientError) => void;
   });
 
@@ -41,6 +47,8 @@ export class Client {
   connected: boolean;
   /** Kept in step with remote edits. Null to track your own instead. */
   selection: Selection | null;
+  onRemote: (op: Operation) => void;
+  onLocal: (op: Operation, before: string) => void;
 
   /** A local edit, written against this client's current document. */
   edit(op: Operation): void;
