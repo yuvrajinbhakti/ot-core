@@ -1,6 +1,6 @@
 {
   "name": "ot-core",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Operational Transform for plain text, with the convergence property actually tested.",
   "type": "module",
   "main": "./src/index.js",

@@ -43,6 +43,9 @@ suite is the point of it.
  50,000 on longer documents       0 divergences
  20,000 on emoji                  0 divergences
 100,000 cursor moves              0 drifted off their character
+240,000 compositions              0 disagreed with applying both
+260,000 inversions                0 failed to round trip
+ 25,000 multi-client sessions     0 clients left holding a different document
 ```
 
 ## The three bugs
@@ -111,8 +114,51 @@ the result is silently wrong rather than an error.
 
 A single `side` for the whole run is correct when a server decides the order,
 because the question is only ever "does the incoming edit yield to the settled
-history" — and the answer is the same for every operation in it. Peer-to-peer
-with no arbiter is a different problem and needs a side per originating peer.
+history" — and the answer is the same for every operation in it.
+
+## You need a server, and here is the proof
+
+This used to say that peer-to-peer "needs a side per originating peer", which
+implied that choosing sides carefully was enough. It is not, and the difference
+matters enough to state with an example rather than a caveat.
+
+Convergence over a *pair* of operations is TP1, which this library has and tests
+exhaustively. Convergence when different participants transform in *different
+orders* is TP2, which this library does not have — and almost no operational
+transform does. Take a two-character document and three edits:
+
+```js
+const doc = 'ab';
+insert(1, 'X')      // peer 0
+insert(0, 'XY')     // peer 1
+remove(0, 1)        // peer 2
+```
+
+Deliver those three to six peers in the six possible orders, with a stable
+per-peer tie-break, and they land on two different documents:
+
+```
+0 → 1 → 2    "XYXb"
+0 → 2 → 1    "XYXb"
+1 → 0 → 2    "XYXb"
+1 → 2 → 0    "XYXb"
+2 → 0 → 1    "XXYb"     <-
+2 → 1 → 0    "XXYb"     <-
+```
+
+That is the smallest case there is; it was found by exhaustive search, and it is
+asserted in `test/session.test.js` so it cannot quietly stop being true. Across
+random triples the rate is about 3.6%.
+
+Impose one order — any order, as long as everybody sees the same one — and it
+goes to zero across 200,000 triples. That is what the server is for. It is not a
+deployment detail you can engineer around with a cleverer `side`.
+
+What *is* tested end to end: 20,000 simulated sessions of up to five clients
+against one server, with edits in flight and acknowledgements arriving late, all
+converging on the server's document — and, at every acknowledgement, the client's
+own rebase of its pending operation matching the server's, which is the invariant
+the whole protocol rests on.
 
 ### Choosing a side
 
@@ -154,6 +200,56 @@ typing, where the caret should follow what you wrote.
 falls *outside* the selection. The intuitive-looking choice — leaning both ends
 inward — makes a selection silently grow to cover whatever a collaborator types
 at its edges.
+
+### Batching and undo
+
+Five keystrokes are five operations on the wire, five entries in the history
+every future operation has to be transformed against, and five steps in an undo
+stack that will undo one character at a time. They are also, obviously, one
+insert:
+
+```js
+import { composeAll, insert } from 'ot-core';
+
+composeAll([insert(4, 'h'), insert(5, 'e'), insert(6, 'y')]);
+// [ insert(4, 'hey') ]
+```
+
+`compose(a, b)` returns `null` when the model cannot express the pair as one
+operation — edits in two places, or a replacement. `composeAll` keeps those
+separate and drops anything that cancels out entirely, so typing a word and
+deleting it again produces nothing to send.
+
+Undo is `invert`, and then the same transform as everything else, because by the
+time somebody presses Ctrl-Z other people have edited:
+
+```js
+import { invert, transformAgainst } from 'ot-core';
+
+const inverse = invert(myOperation, documentBeforeIt);
+const undo = transformAgainst(inverse, everythingSince, 'left');
+```
+
+One thing to expect: if somebody has already deleted across the text you typed,
+your undo correctly does nothing. Undo here means "remove what is left of my
+contribution", not "recompute history as though I never typed" — the second is
+exclusion transformation, and this library does not do it.
+
+### Operations off the network
+
+`insert()` and `remove()` validate their arguments, which does not help with the
+operation a client sent you. `apply` clamps an out-of-range position on purpose,
+so a malformed delete does not throw — it removes the wrong text, and every
+client converges on the damage:
+
+```js
+import { assertValid } from 'ot-core';
+
+socket.on('operation', (raw) => {
+  const op = assertValid(raw, Array.from(doc).length);  // throws with the reason
+  doc = apply(doc, op);
+});
+```
 
 ## The trade-off you should know about
 
@@ -201,6 +297,13 @@ compact.
 | `transformSelection(sel, op)`       | move both ends of a `{ anchor, head }` selection          |
 | `diff(before, after)`               | turn two document states into operations                  |
 | `isNoop(op)`                        | did transform cancel this operation?                      |
+| `compose(a, b)`                     | one operation meaning `a` then `b`, or `null`             |
+| `composeAll(ops)`                   | collapse a run as far as the model allows                 |
+| `invert(op, doc)`                   | the operation that undoes `op`                            |
+| `invertAll(ops, doc)`               | a run that undoes a run                                   |
+| `isValid(op, docLength?)`           | is this safe to apply?                                    |
+| `whyInvalid(op, docLength?)`        | the reason it is not, or `null`                           |
+| `assertValid(op, docLength?)`       | the same, but throws                                      |
 
 Positions count Unicode code points, not UTF-16 units, so an emoji is one
 position rather than two.
@@ -208,7 +311,7 @@ position rather than two.
 ## Testing
 
 ```bash
-npm test     # 37 tests, 420,000 fuzzed checks
+npm test     # 65 tests, 920,000 property checks + 25,000 simulated sessions
 npm run bench
 ```
 
@@ -219,14 +322,22 @@ is looking for only appear when two edits genuinely overlap.
 
 ## What this is not
 
-Not a CRDT: it needs a server to order operations. Not rich text: plain strings
-only. No undo stack and no presence.
+Not a CRDT: it needs a server to order operations, and the section above shows
+what happens without one. Not rich text: plain strings only. No presence, no
+transport, no editor bindings — those belong in packages that depend on this
+one, not in it.
 
-No `compose` either, and that is a consequence of the model rather than an
-omission: two sequential operations far apart in a document cannot be expressed
-as one position and one length, so a compose here could only ever return the
-array you already had. Compaction in this model means dropping history every
-client has acknowledged, not merging operations together.
+No undo *stack*, though `invert` is the piece one needs. Deciding what a user
+meant by Ctrl-Z — their last edit, or the last edit in the document — is an
+application's question, not this library's.
+
+This section used to claim there was no `compose` and could not be one, on the
+grounds that two operations far apart cannot be expressed as one position and
+one length. The first half was true and the second half was wrong. Edits far
+apart do stay separate, but consecutive keystrokes are not far apart: typing a
+five-letter word produces five inserts that are exactly one insert, and a
+backspace run is one delete. `compose` merges those and returns `null` for the
+rest, which is why `composeAll` returns an array rather than an operation.
 
 ## License
 

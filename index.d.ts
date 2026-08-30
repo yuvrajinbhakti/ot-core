@@ -51,3 +51,48 @@ export function transformSelection(selection: Selection, op: Operation): Selecti
 
 /** Turn "the document used to say this and now says that" into operations. */
 export function diff(before: string, after: string): Operation[];
+
+/**
+ * One operation equivalent to `a` then `b`, or `null` where the model cannot
+ * express it. `b` must be written against the document as it stands after `a`.
+ *
+ *     apply(doc, compose(a, b)) === apply(apply(doc, a), b)
+ *
+ * Merges a burst of typing into one operation, and a backspace run into one
+ * delete. Returns `null` for edits in two places, and for a replacement — which
+ * is irreducibly two operations here, and is why `diff` returns two.
+ */
+export function compose(a: Operation, b: Operation): Operation | null;
+
+/** Compose a run as far as it will go, dropping anything that cancels out. */
+export function composeAll(ops: readonly Operation[]): Operation[];
+
+/**
+ * The operation that undoes `op`, given the document `op` was applied to.
+ *
+ *     apply(apply(doc, op), invert(op, doc)) === doc
+ *
+ * Needs the document because a delete does not record what it removed. To undo
+ * in a shared document, transform the inverse past everything that has happened
+ * since — see `transformAgainst`.
+ *
+ * @throws {RangeError} if `op` is not in range for `doc`.
+ */
+export function invert(op: Operation, doc: string): Operation;
+
+/** Invert a run into a run that undoes it, in the order to apply them. */
+export function invertAll(ops: readonly Operation[], doc: string): Operation[];
+
+/**
+ * Why `op` is not usable, or `null` if it is. For operations arriving over a
+ * network, where `apply` clamping an out-of-range position means silently
+ * damaging the document rather than throwing.
+ *
+ * Pass `documentLength` in code points to also check the operation fits.
+ */
+export function whyInvalid(op: unknown, documentLength?: number): string | null;
+
+export function isValid(op: unknown, documentLength?: number): boolean;
+
+/** @throws {TypeError} with the reason. Returns the operation for chaining. */
+export function assertValid(op: unknown, documentLength?: number): Operation;
