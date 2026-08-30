@@ -199,8 +199,10 @@ export function changeFromOperation(doc, op) {
  * The editor's own selection needs nothing from this library: CodeMirror maps
  * it through the change set it is given, which is the same arithmetic
  * `transformPosition` does. `transformPosition` is for positions held outside
- * the editor — other people's cursors, a comment anchor — and this binding does
- * not invent presence to have somewhere to use it.
+ * the editor — other people's cursors, a comment anchor — and this binding still
+ * does not draw them. `presence.js` is where that lives now; compose the two by
+ * calling `track(client, presence)` alongside this extension, which chains onto
+ * the same hooks rather than replacing them.
  *
  * @param {import('./client.js').Client} client
  * @returns {import('@codemirror/state').Extension}

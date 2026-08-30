@@ -47,9 +47,16 @@ export class Client {
    *   A remote operation, already transformed into this client's coordinates.
    *   This is what an editor binds to: apply it to the view, and move any
    *   decorations that are not the main selection.
+   * @param {(op: Operation, before: string) => void} [options.onLocal]
+   *   An edit this client just made, after it has been applied to `document` and
+   *   before it goes out, along with the document as it was immediately before.
+   *   The symmetric counterpart to `onRemote`, and the hook anything holding
+   *   positions needs in order to move them for local typing as well as remote
+   *   — see `presence.js`. `before` is there for `undo.js`, which cannot invert
+   *   a delete without it.
    * @param {(reason: { code: string, reason: string }) => void} [options.onError]
    */
-  constructor({ id, send, document = '', revision = 0, onRemote, onError } = {}) {
+  constructor({ id, send, document = '', revision = 0, onRemote, onLocal, onError } = {}) {
     if (typeof id !== 'string' || id === '') throw new TypeError('id must be a non-empty string');
     if (typeof send !== 'function') throw new TypeError('a send function is required');
     this.id = id;
@@ -57,6 +64,7 @@ export class Client {
     this.document = document;
     this.revision = revision;
     this.onRemote = onRemote ?? (() => {});
+    this.onLocal = onLocal ?? (() => {});
     this.onError = onError ?? (() => {});
 
     /** @type {Operation | null} sent, not acknowledged */
@@ -108,8 +116,21 @@ export class Client {
    * @param {Operation} op  written against this client's current document
    */
   edit(op) {
+    // Kept because a delete does not carry the text it removed — that is the
+    // whole reason `invert` takes the document — so a listener that wants to
+    // undo this edit cannot reconstruct the pre-image from what it is handed.
+    // Passing it costs a reference and is the difference between undo working
+    // and undo inserting an empty string where the deleted text belonged.
+    const before = this.document;
+
     this.document = apply(this.document, op);
     if (this.selection) this.selection = transformSelection(this.selection, op);
+    // Fired before the send, so anything anchored to the document has already
+    // moved by the time the operation is on the wire. Order matters for
+    // presence: a peer's cursor must shift for *your* typing too, and the
+    // version of that bug where it does not only appears while the other person
+    // is idle — which is precisely when you are watching their caret.
+    this.onLocal(op, before);
 
     if (this.outstanding === null) {
       this.#promote(op);
@@ -246,8 +267,13 @@ export class Client {
           });
           return;
         }
-        this.#applyRemote(m.op);
+        // Revision first, so a callback firing inside `#applyRemote` sees the
+        // revision the document is actually at. Nothing in `#applyRemote` reads
+        // it, and a listener handed an operation alongside the number it
+        // superseded has to guess — presence needs the real one to know which
+        // reports are stale.
         this.revision = m.revision;
+        this.#applyRemote(m.op);
         return;
     }
   }
