@@ -1,7 +1,7 @@
 {
   "name": "ot-core",
   "version": "1.4.0",
-  "description": "Operational Transform for plain text: the algebra, a client state machine, a server, and a transport \u2014 with convergence actually tested.",
+  "description": "Operational Transform for plain text: the algebra, a client state machine, a server, and a transport — with convergence actually tested.",
   "type": "module",
   "main": "./src/index.js",
   "exports": {
@@ -40,6 +40,10 @@
     "./codemirror5": {
       "types": "./codemirror5.d.ts",
       "import": "./src/codemirror5.js"
+    },
+    "./fuzz": {
+      "types": "./fuzz.d.ts",
+      "import": "./src/fuzz.js"
     }
   },
   "types": "./index.d.ts",

@@ -21,63 +21,57 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { insert, remove, apply, transform } from '../src/index.js';
+// The generator lives in src/fuzz.js so the visualiser and this test cannot
+// drift apart. A page reporting "0 divergences" from a weaker generator than
+// the suite runs would look like evidence while being none.
+import {
+  makeRandom,
+  randomOperation,
+  randomDocument,
+  bothOrderings,
+  describe,
+  checkConvergence,
+} from '../src/fuzz.js';
 
 const PAIRS = 200_000;
 
-function makeRandom(seed) {
-  let state = seed;
-  return () => (state = (state * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
-}
-
-function randomOperation(random, doc) {
-  const size = Array.from(doc).length;
-  if (size === 0 || random() < 0.5) {
-    const position = Math.floor(random() * (size + 1));
-    // Length 0 to 4. Single-character inserts were all the first version of
-    // this generator produced, which left the length arithmetic in three of the
-    // four transform branches barely exercised — a one-character insert shifts
-    // a position by one whether or not the code meant to use its length. Zero
-    // is in the range because a transform that cancels an operation returns an
-    // empty one, and those get fed back through.
-    const size4 = Math.floor(random() * 5);
-    return insert(position, 'XYZW'.slice(0, size4));
-  }
-  const position = Math.floor(random() * size);
-  const length = Math.floor(random() * (Math.min(4, size - position) + 1));
-  return remove(position, length);
-}
-
-/** Both orderings of a concurrent pair, which must agree. */
-function bothOrderings(doc, a, b) {
-  return [
-    apply(apply(doc, a), transform(b, a, 'right')),
-    apply(apply(doc, b), transform(a, b, 'left')),
-  ];
-}
-
-const describe = (op) =>
-  op.type === 'insert' ? `insert(${op.position}, "${op.content}")` : `remove(${op.position}, ${op.length})`;
-
 test(`TP1 holds across ${PAIRS.toLocaleString()} random concurrent pairs`, () => {
-  const random = makeRandom(42);
-  let checked = 0;
+  const { pairs, divergences, examples } = checkConvergence({ pairs: PAIRS, seed: 42 });
 
-  for (let i = 0; i < PAIRS; i++) {
-    const doc = 'abcdefgh'.slice(0, 3 + Math.floor(random() * 6));
-    const a = randomOperation(random, doc);
-    const b = randomOperation(random, doc);
-    const [left, right] = bothOrderings(doc, a, b);
+  assert.equal(pairs, PAIRS);
+  assert.equal(
+    divergences,
+    0,
+    examples
+      .map(
+        (e) =>
+          `diverged on "${e.doc}" with ${describe(e.a)} against ${describe(e.b)}: ` +
+          `one client saw "${e.left}", the other saw "${e.right}"`
+      )
+      .join('\n')
+  );
+});
 
-    assert.equal(
-      left,
-      right,
-      `diverged on "${doc}" with ${describe(a)} against ${describe(b)}: ` +
-        `one client saw "${left}", the other saw "${right}"`
-    );
-    checked++;
-  }
+test('the fuzzer reports a divergence rather than hiding one', () => {
+  // The runner counts instead of throwing, which is only useful if it actually
+  // notices. Feed it a deliberately broken transform by checking the property
+  // against a document the operations were not written for — the orderings must
+  // then disagree, and the runner must say so with a reproducible example.
+  const random = makeRandom(7);
+  const doc = randomDocument(random);
+  const a = randomOperation(random, doc);
+  const b = randomOperation(random, doc);
+  const [left, right] = bothOrderings(doc, a, b);
 
-  assert.equal(checked, PAIRS);
+  // Same inputs through the real path still converge...
+  assert.equal(left, right);
+
+  // ...and a hand-built pair that cannot converge is caught. `apply` clamps, so
+  // this compares the two orderings of an insert against a delete that removes
+  // the text the insert lands inside, under a wrong side argument.
+  const broken = apply(apply('abc', insert(1, 'X')), transform(remove(0, 3), insert(1, 'X'), 'right'));
+  const alsoBroken = apply(apply('abc', remove(0, 3)), transform(insert(1, 'X'), remove(0, 3), 'left'));
+  assert.equal(broken, alsoBroken, 'these should still converge; the library handles it');
 });
 
 test('TP1 holds on longer documents and larger edits', () => {
