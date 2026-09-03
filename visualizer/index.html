@@ -1,0 +1,807 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ot-core — convergence, visible</title>
+<meta name="description" content="Watch two concurrent edits transform against each other, then run the convergence property yourself against the real library.">
+
+<!--
+  This page imports ot-core from ../src. It does not reimplement anything.
+
+  That is the entire point. A visualiser carrying its own copy of `transform`
+  would be a drawing of a claim rather than a demonstration of one, and the
+  counter at the bottom would be a number I typed rather than a number the
+  library produced. Everything shown here is computed live by the same code npm
+  installs, and the fuzzer is the same module `test/convergence.test.js` runs.
+-->
+
+<style>
+  :root {
+    --bg:        #0F1216;
+    --panel:     #171B21;
+    --raised:    #1E242C;
+    --ink:       #E3E8ED;
+    --muted:     #939FAC;
+    --rule:      #262C34;
+    --a:         #7FAEE3;
+    --a-dim:     #16212F;
+    --b:         #E0A458;
+    --b-dim:     #2A1E16;
+    --ok:        #6BBF8A;
+    --bad:       #E06C75;
+    --mono: ui-monospace, "SF Mono", "IBM Plex Mono", Menlo, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 60rem; margin: 0 auto; padding: 3.5rem 1.25rem 5rem; }
+
+  header { border-bottom: 1px solid var(--rule); padding-bottom: 1.75rem; margin-bottom: 2.5rem; }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 0.75rem;
+  }
+
+  h1 {
+    margin: 0 0 0.6rem;
+    font-size: clamp(1.7rem, 4.5vw, 2.4rem);
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+  }
+
+  .standfirst { margin: 0; color: var(--muted); max-width: 44rem; }
+
+  h2 {
+    font-size: 1.15rem;
+    margin: 3rem 0 0.4rem;
+    letter-spacing: -0.01em;
+  }
+  h2:first-of-type { margin-top: 0; }
+
+  .section-note { margin: 0 0 1.25rem; color: var(--muted); font-size: 0.92rem; max-width: 46rem; }
+
+  code, .mono { font-family: var(--mono); }
+
+  /* ------------------------------------------------------------ the law */
+
+  .law {
+    background: var(--panel);
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    padding: 1.25rem 1.5rem;
+    overflow-x: auto;
+  }
+
+  .law pre {
+    margin: 0;
+    font-family: var(--mono);
+    font-size: 0.88rem;
+    line-height: 1.75;
+    white-space: pre;
+  }
+
+  .law .op-a { color: var(--a); }
+  .law .op-b { color: var(--b); }
+  .law .eq { color: var(--muted); }
+
+  /* ---------------------------------------------------------- the inputs */
+
+  .controls {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .field { display: flex; flex-direction: column; gap: 0.35rem; }
+
+  .field > label {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .field.a > label { color: var(--a); }
+  .field.b > label { color: var(--b); }
+
+  input, select {
+    background: var(--raised);
+    border: 1px solid var(--rule);
+    border-radius: 7px;
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: 0.9rem;
+    padding: 0.55rem 0.7rem;
+    width: 100%;
+  }
+
+  input:focus, select:focus { outline: none; border-color: var(--a); }
+
+  .row { display: flex; gap: 0.5rem; }
+  .row input { min-width: 0; }
+  .row input.pos { flex: 0 0 5rem; }
+
+  /* --------------------------------------------------------- the diagram */
+
+  .flow {
+    display: grid;
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    overflow: hidden;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .cell { background: var(--panel); padding: 1rem 1.15rem; min-width: 0; }
+  .cell.full { grid-column: 1 / -1; }
+
+  .cell h3 {
+    margin: 0 0 0.55rem;
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 500;
+  }
+
+  .cell.a h3 { color: var(--a); }
+  .cell.b h3 { color: var(--b); }
+
+  .doc {
+    font-family: var(--mono);
+    font-size: 1.05rem;
+    letter-spacing: 0.02em;
+    word-break: break-all;
+    min-height: 1.6em;
+  }
+
+  /* The inserted and deleted spans, so you can see what each edit did. */
+  .doc .ins-a { background: var(--a-dim); color: var(--a); border-radius: 3px; padding: 0 2px; }
+  .doc .ins-b { background: var(--b-dim); color: var(--b); border-radius: 3px; padding: 0 2px; }
+  .doc .gone  { color: var(--muted); text-decoration: line-through; opacity: 0.55; }
+
+  .op {
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    color: var(--ink);
+  }
+
+  .op .noop { color: var(--muted); font-style: italic; }
+
+  .verdict {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-family: var(--mono);
+    font-size: 0.85rem;
+  }
+
+  .verdict.ok { color: var(--ok); }
+  .verdict.bad { color: var(--bad); }
+
+  .dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; flex: none; background: currentColor; }
+
+  .arrow {
+    text-align: center;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    padding: 0.5rem 0;
+    letter-spacing: 0.1em;
+  }
+
+  /* ----------------------------------------------------------- the fuzz */
+
+  .fuzz {
+    background: var(--panel);
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    padding: 1.5rem;
+  }
+
+  .fuzz-controls { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: flex-end; }
+
+  button {
+    background: var(--a);
+    color: #0F1216;
+    border: none;
+    border-radius: 7px;
+    padding: 0.6rem 1.3rem;
+    font-family: var(--sans);
+    font-size: 0.92rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  button:hover:not(:disabled) { filter: brightness(1.1); }
+  button:disabled { opacity: 0.55; cursor: default; }
+  button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+  .results {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    overflow: hidden;
+    margin-top: 1.5rem;
+  }
+
+  .results div { background: var(--raised); padding: 0.9rem 1rem; }
+
+  .results dt {
+    font-family: var(--mono);
+    font-size: 1.5rem;
+    font-variant-numeric: tabular-nums;
+    margin: 0 0 0.15rem;
+  }
+
+  .results dd {
+    margin: 0;
+    font-size: 0.78rem;
+    color: var(--muted);
+  }
+
+  .results .zero { color: var(--ok); }
+  .results .nonzero { color: var(--bad); }
+
+  progress {
+    width: 100%;
+    height: 4px;
+    margin-top: 1rem;
+    appearance: none;
+    border: none;
+    background: var(--rule);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  progress::-webkit-progress-bar { background: var(--rule); }
+  progress::-webkit-progress-value { background: var(--a); }
+  progress::-moz-progress-bar { background: var(--a); }
+  progress[hidden] { display: none; }
+
+  .sabotage {
+    margin-top: 1.75rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--rule);
+  }
+
+  .sabotage p { margin: 0 0 1rem; color: var(--muted); font-size: 0.9rem; max-width: 44rem; }
+  .sabotage strong { color: var(--ink); }
+
+  button.secondary { background: var(--raised); color: var(--ink); border: 1px solid var(--rule); }
+  button.secondary:hover:not(:disabled) { border-color: var(--b); filter: none; }
+
+  .compare {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    overflow: hidden;
+    margin-top: 1.25rem;
+  }
+  .compare[hidden] { display: none; }
+  .compare > div { background: var(--raised); padding: 0.9rem 1rem; }
+
+  .compare .label {
+    display: block;
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 0.3rem;
+  }
+
+  .compare .value { font-family: var(--mono); font-size: 1.25rem; font-variant-numeric: tabular-nums; }
+  .compare .value.zero { color: var(--ok); }
+  .compare .value.nonzero { color: var(--bad); }
+
+  .counterexamples {
+    margin-top: 1.25rem;
+    font-family: var(--mono);
+    font-size: 0.82rem;
+    color: var(--bad);
+    white-space: pre-wrap;
+  }
+
+  footer {
+    margin-top: 4rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--rule);
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    color: var(--muted);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.5rem;
+  }
+
+  footer a { color: var(--a); }
+
+  .caveat {
+    margin-top: 1.25rem;
+    padding: 0.9rem 1.1rem;
+    border-left: 2px solid var(--b);
+    background: var(--b-dim);
+    border-radius: 0 6px 6px 0;
+    font-size: 0.88rem;
+    color: var(--ink);
+  }
+
+  .error-banner {
+    background: var(--b-dim);
+    border: 1px solid var(--b);
+    border-radius: 8px;
+    padding: 1rem 1.15rem;
+    margin-bottom: 2rem;
+    font-size: 0.9rem;
+  }
+  .error-banner code { color: var(--b); }
+  .error-banner[hidden] { display: none; }
+
+  @media (max-width: 40rem) {
+    .flow { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="eyebrow">ot-core</div>
+    <h1>Two people typed in the same place</h1>
+    <p class="standfirst">
+      Operational Transform has one law worth the name. This page runs it against
+      the real library — edit the boxes, watch both participants end up holding
+      the same text, then check it yourself over a hundred thousand random pairs.
+    </p>
+  </header>
+
+  <div class="error-banner" id="load-error" hidden>
+    <strong>The library did not load.</strong>
+    This page imports <code>../src/index.js</code> as an ES module, which browsers
+    refuse to do over <code>file://</code>. Serve the repository instead:
+    <code>npx serve .</code> then open <code>/visualizer/</code>.
+  </div>
+
+  <h2>The law</h2>
+  <p class="section-note">
+    Given two edits written against the same document, each participant applies
+    its own first and the other's second. Convergence is the claim that they then
+    hold identical text — and nothing else. It is checkable without knowing what
+    the document <em>should</em> say, which is what makes it fuzzable: there is no
+    expected output to write down, only two strings that must match.
+  </p>
+
+  <div class="law">
+<pre>apply(apply(doc, <span class="op-a">A</span>), transform(<span class="op-b">B</span>, <span class="op-a">A</span>, 'right'))
+        <span class="eq">===</span>
+apply(apply(doc, <span class="op-b">B</span>), transform(<span class="op-a">A</span>, <span class="op-b">B</span>, 'left'))</pre>
+  </div>
+
+  <h2>Watch it happen</h2>
+  <p class="section-note">
+    Change anything below. Try putting both edits at the same position — that is
+    the case with no natural answer, where the two sides have to break the tie the
+    same way or diverge.
+  </p>
+
+  <div class="controls">
+    <div class="field">
+      <label for="doc">Document</label>
+      <input id="doc" value="Hello World" spellcheck="false">
+    </div>
+
+    <div class="field a">
+      <label for="a-type">Operation A</label>
+      <div class="row">
+        <select id="a-type">
+          <option value="insert" selected>insert</option>
+          <option value="delete">delete</option>
+        </select>
+        <input class="pos" id="a-pos" type="number" min="0" value="6" aria-label="A position">
+        <input id="a-arg" value="beautiful " spellcheck="false" aria-label="A content">
+      </div>
+    </div>
+
+    <div class="field b">
+      <label for="b-type">Operation B</label>
+      <div class="row">
+        <select id="b-type">
+          <option value="insert">insert</option>
+          <option value="delete" selected>delete</option>
+        </select>
+        <input class="pos" id="b-pos" type="number" min="0" value="0" aria-label="B position">
+        <input id="b-arg" type="number" min="0" value="6" aria-label="B length">
+      </div>
+    </div>
+  </div>
+
+  <div class="flow">
+    <div class="cell full">
+      <h3>Starting document</h3>
+      <div class="doc" id="out-doc"></div>
+    </div>
+
+    <div class="cell a">
+      <h3>A applies its own edit</h3>
+      <div class="doc" id="out-a1"></div>
+    </div>
+    <div class="cell b">
+      <h3>B applies its own edit</h3>
+      <div class="doc" id="out-b1"></div>
+    </div>
+
+    <div class="cell full arrow">↓ &nbsp; each now receives the other's edit, rebased &nbsp; ↓</div>
+
+    <div class="cell a">
+      <h3>B's edit, transformed for A</h3>
+      <div class="op" id="out-bt"></div>
+    </div>
+    <div class="cell b">
+      <h3>A's edit, transformed for B</h3>
+      <div class="op" id="out-at"></div>
+    </div>
+
+    <div class="cell a">
+      <h3>A ends up with</h3>
+      <div class="doc" id="out-a2"></div>
+    </div>
+    <div class="cell b">
+      <h3>B ends up with</h3>
+      <div class="doc" id="out-b2"></div>
+    </div>
+
+    <div class="cell full">
+      <div class="verdict" id="out-verdict"><span class="dot"></span><span id="out-verdict-text"></span></div>
+    </div>
+  </div>
+
+  <h2>Check it yourself</h2>
+  <p class="section-note">
+    This runs <code>checkConvergence</code> from <code>ot-core/fuzz</code> — the
+    same module the test suite runs, so the number here means what the number in
+    CI means. The generator biases hard towards collisions: short documents, short
+    edits, half of them deletes, so random pairs land on top of each other far
+    more often than they would in prose.
+  </p>
+
+  <div class="fuzz">
+    <div class="fuzz-controls">
+      <div class="field" style="flex: 0 0 10rem;">
+        <label for="pairs">Pairs</label>
+        <select id="pairs">
+          <option value="10000">10,000</option>
+          <option value="100000" selected>100,000</option>
+          <option value="500000">500,000</option>
+        </select>
+      </div>
+      <div class="field" style="flex: 0 0 8rem;">
+        <label for="seed">Seed</label>
+        <input id="seed" type="number" value="42">
+      </div>
+      <button id="run">Run</button>
+    </div>
+
+    <progress id="progress" hidden max="100" value="0"></progress>
+
+    <div class="results">
+      <div><dt class="mono" id="r-pairs">—</dt><dd>pairs tested</dd></div>
+      <div><dt class="mono" id="r-div">—</dt><dd>divergent documents</dd></div>
+      <div><dt class="mono" id="r-ms">—</dt><dd>elapsed</dd></div>
+      <div><dt class="mono" id="r-rate">—</dt><dd>pairs / second</dd></div>
+    </div>
+
+    <div class="counterexamples" id="r-examples"></div>
+
+    <!--
+      The control that makes the one above mean something. Zero divergences looks
+      identical whether the transform is right or the harness is broken, so the
+      same run is offered against a transform that is definitely wrong.
+    -->
+    <div class="sabotage">
+      <p>
+        <strong>Is that zero worth anything?</strong>
+        A passing property test is only evidence if it could have failed. Run the
+        identical fuzzer against a transform that ignores the operation it is
+        meant to rebase against — the thing an OT implementation does before
+        anyone writes the hard part.
+      </p>
+      <button id="run-broken" class="secondary">Run against a broken transform</button>
+      <div class="compare" id="compare" hidden>
+        <div>
+          <span class="label">this library</span>
+          <span class="value zero" id="c-real">—</span>
+        </div>
+        <div>
+          <span class="label">identity transform</span>
+          <span class="value nonzero" id="c-broken">—</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="caveat">
+    <strong>What this does not prove.</strong> TP1 is convergence for a pair of
+    concurrent operations, and that is the whole of what is checked here. This
+    library does not implement TP2, so it does not claim to converge for three or
+    more operations that need to be transformed against each other in different
+    orders — the case an undo of an old edit can reach. That limitation is
+    documented rather than fuzzed around.
+  </div>
+
+  <footer>
+    <span>ot-core</span>
+    <a href="https://www.npmjs.com/package/ot-core">npm</a>
+    <a href="https://github.com/yuvrajinbhakti/ot-core">source</a>
+    <span id="foot-note">every number on this page was computed in your browser</span>
+  </footer>
+
+</div>
+
+<script type="module">
+  // The real library. If this import fails, nothing below runs and the banner
+  // at the top explains why — which is better than a page that silently renders
+  // a hand-written example and looks like it worked.
+  let insert, remove, apply, transform, checkConvergence, identityTransform;
+  try {
+    ({ insert, remove, apply, transform } = await import('../src/index.js'));
+    ({ checkConvergence, identityTransform } = await import('../src/fuzz.js'));
+  } catch (error) {
+    document.getElementById('load-error').hidden = false;
+    console.error('ot-core failed to load', error);
+    throw error;
+  }
+
+  const $ = (id) => document.getElementById(id);
+  const escapeHtml = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  /** Code points, not code units — the library counts in code points. */
+  const chars = (s) => Array.from(s);
+
+  const describeOp = (op) =>
+    op.length === 0
+      ? '<span class="noop">(nothing — cancelled by the other edit)</span>'
+      : op.type === 'insert'
+        ? `insert(${op.position}, ${escapeHtml(JSON.stringify(op.content))})`
+        : `remove(${op.position}, ${op.length})`;
+
+  /**
+   * Render a document with one operation's effect highlighted.
+   *
+   * An insert shows the new text tinted; a delete shows the removed text struck
+   * through in place, because seeing *what* went is more useful than seeing a
+   * shorter string and having to work out the difference.
+   */
+  function renderDoc(doc, op, who) {
+    if (!op) return escapeHtml(doc);
+    const cs = chars(doc);
+    if (op.type === 'insert') {
+      if (op.length === 0) return escapeHtml(doc);
+      const at = Math.min(op.position, cs.length);
+      return (
+        escapeHtml(cs.slice(0, at).join('')) +
+        `<span class="ins-${who}">${escapeHtml(op.content)}</span>` +
+        escapeHtml(cs.slice(at + chars(op.content).length).join(''))
+      );
+    }
+    return escapeHtml(doc);
+  }
+
+  /** Show a delete against the document it was applied to, struck through. */
+  function renderDelete(before, op, who) {
+    const cs = chars(before);
+    const from = Math.min(op.position, cs.length);
+    const to = Math.min(from + op.length, cs.length);
+    if (op.length === 0) return escapeHtml(before);
+    return (
+      escapeHtml(cs.slice(0, from).join('')) +
+      `<span class="gone">${escapeHtml(cs.slice(from, to).join(''))}</span>` +
+      escapeHtml(cs.slice(to).join(''))
+    );
+  }
+
+  function readOp(prefix) {
+    const type = $(`${prefix}-type`).value;
+    const position = Math.max(0, parseInt($(`${prefix}-pos`).value, 10) || 0);
+    if (type === 'insert') return insert(position, $(`${prefix}-arg`).value);
+    return remove(position, Math.max(0, parseInt($(`${prefix}-arg`).value, 10) || 0));
+  }
+
+  /** Swap the content field between text and a length, to match the op type. */
+  function syncArgField(prefix) {
+    const isInsert = $(`${prefix}-type`).value === 'insert';
+    const field = $(`${prefix}-arg`);
+    if (isInsert && field.type === 'number') {
+      field.type = 'text';
+      field.value = 'X';
+      field.setAttribute('aria-label', `${prefix.toUpperCase()} content`);
+    } else if (!isInsert && field.type === 'text') {
+      field.type = 'number';
+      field.min = '0';
+      field.value = '1';
+      field.setAttribute('aria-label', `${prefix.toUpperCase()} length`);
+    }
+  }
+
+  function render() {
+    let doc, a, b;
+    try {
+      doc = $('doc').value;
+      a = readOp('a');
+      b = readOp('b');
+    } catch (error) {
+      // insert()/remove() throw on a negative position. Say so rather than
+      // leaving the last good render on screen looking current.
+      $('out-verdict').className = 'verdict bad';
+      $('out-verdict-text').textContent = error.message;
+      return;
+    }
+
+    // Each participant applies its own edit first.
+    const afterA = apply(doc, a);
+    const afterB = apply(doc, b);
+
+    // Then receives the other's, rebased against what it already did.
+    const bForA = transform(b, a, 'right');
+    const aForB = transform(a, b, 'left');
+
+    const finalA = apply(afterA, bForA);
+    const finalB = apply(afterB, aForB);
+
+    $('out-doc').textContent = doc;
+    $('out-a1').innerHTML = a.type === 'insert' ? renderDoc(afterA, a, 'a') : renderDelete(doc, a, 'a');
+    $('out-b1').innerHTML = b.type === 'insert' ? renderDoc(afterB, b, 'b') : renderDelete(doc, b, 'b');
+    $('out-bt').innerHTML = describeOp(bForA);
+    $('out-at').innerHTML = describeOp(aForB);
+    $('out-a2').textContent = finalA;
+    $('out-b2').textContent = finalB;
+
+    const converged = finalA === finalB;
+    $('out-verdict').className = `verdict ${converged ? 'ok' : 'bad'}`;
+    $('out-verdict-text').textContent = converged
+      ? `Both hold "${finalA}" — converged.`
+      : `Diverged: A holds "${finalA}", B holds "${finalB}".`;
+  }
+
+  for (const id of ['doc', 'a-type', 'a-pos', 'a-arg', 'b-type', 'b-pos', 'b-arg']) {
+    $(id).addEventListener('input', render);
+  }
+  $('a-type').addEventListener('change', () => { syncArgField('a'); render(); });
+  $('b-type').addEventListener('change', () => { syncArgField('b'); render(); });
+
+  render();
+
+  /* --------------------------------------------------------------- fuzz */
+
+  const run = $('run');
+
+  run.addEventListener('click', async () => {
+    const pairs = parseInt($('pairs').value, 10);
+    const seed = parseInt($('seed').value, 10) || 42;
+
+    run.disabled = true;
+    run.textContent = 'Running…';
+    $('progress').hidden = false;
+    $('progress').value = 0;
+    $('r-examples').textContent = '';
+
+    // Yield once so the disabled state and progress bar actually paint before
+    // the main thread is taken for the duration of the run.
+    //
+    // `setTimeout`, not `requestAnimationFrame`: rAF does not fire at all in a
+    // background or hidden tab, so a run started in one would park here forever
+    // with the button stuck on "Running…" and no way to tell it had not begun.
+    // A timer keeps firing when the tab is hidden — throttled, but firing.
+    await new Promise((r) => setTimeout(r, 0));
+
+    // Chunked so the progress bar moves and the tab stays responsive. The work
+    // is identical either way — checkConvergence is called repeatedly with a
+    // slice of the total, and the counts are summed.
+    const CHUNK = 25_000;
+    let done = 0;
+    let divergences = 0;
+    const examples = [];
+    const started = performance.now();
+
+    while (done < pairs) {
+      const size = Math.min(CHUNK, pairs - done);
+      // Each chunk gets its own seed derived from the base, so the whole run is
+      // still deterministic but the chunks do not repeat the same sequence.
+      const result = checkConvergence({ pairs: size, seed: seed + done, maxExamples: 3 });
+      divergences += result.divergences;
+      for (const e of result.examples) if (examples.length < 3) examples.push(e);
+      done += size;
+
+      $('progress').value = (done / pairs) * 100;
+      await new Promise((r) => setTimeout(r, 0));
+    }
+
+    const ms = performance.now() - started;
+
+    $('r-pairs').textContent = pairs.toLocaleString();
+    $('r-div').textContent = divergences.toLocaleString();
+    $('r-div').className = `mono ${divergences === 0 ? 'zero' : 'nonzero'}`;
+    $('r-ms').textContent = ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(2)}s`;
+    $('r-rate').textContent = Math.round(pairs / (ms / 1000)).toLocaleString();
+
+    if (examples.length > 0) {
+      $('r-examples').textContent = examples
+        .map(
+          (e) =>
+            `diverged on "${e.doc}"\n  A: ${JSON.stringify(e.a)}\n  B: ${JSON.stringify(e.b)}\n` +
+            `  A ended with "${e.left}"\n  B ended with "${e.right}"`
+        )
+        .join('\n\n');
+    }
+
+    $('progress').hidden = true;
+    run.disabled = false;
+    run.textContent = 'Run again';
+  });
+
+  /* ---------------------------------------------------- proving it can fail */
+
+  const runBroken = $('run-broken');
+
+  runBroken.addEventListener('click', async () => {
+    const pairs = parseInt($('pairs').value, 10);
+    const seed = parseInt($('seed').value, 10) || 42;
+
+    runBroken.disabled = true;
+    runBroken.textContent = 'Running both…';
+    await new Promise((r) => setTimeout(r, 0));
+
+    // Same pairs, same seed, same runner. The only difference is the transform,
+    // which is the whole point — anything else varying would make the comparison
+    // meaningless.
+    const CHUNK = 25_000;
+    const totals = { real: 0, broken: 0 };
+
+    for (const [key, transform] of [['real', undefined], ['broken', identityTransform]]) {
+      let done = 0;
+      while (done < pairs) {
+        const size = Math.min(CHUNK, pairs - done);
+        const result = checkConvergence({ pairs: size, seed: seed + done, maxExamples: 0, transform });
+        totals[key] += result.divergences;
+        done += size;
+        await new Promise((r) => setTimeout(r, 0));
+      }
+    }
+
+    const pct = (n) => `${((n / pairs) * 100).toFixed(1)}%`;
+    $('c-real').textContent = `${totals.real.toLocaleString()} diverged`;
+    $('c-broken').textContent = `${totals.broken.toLocaleString()} diverged · ${pct(totals.broken)}`;
+    $('compare').hidden = false;
+
+    runBroken.disabled = false;
+    runBroken.textContent = 'Run again';
+  });
+</script>
+</body>
+</html>

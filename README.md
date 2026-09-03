@@ -16,6 +16,55 @@ Zero dependencies. ESM. Node 18+ and any modern browser.
 
 ---
 
+## Convergence, checkable
+
+One law defines correctness here. For two edits written against the same
+document, each participant applies its own first and the other's second, and both
+must end up holding identical text:
+
+```js
+apply(apply(doc, a), transform(b, a, 'right'))
+  === apply(apply(doc, b), transform(a, b, 'left'))
+```
+
+The fuzzer that checks it is exported, so the claim is not something you have to
+take on trust:
+
+```js
+import { checkConvergence } from 'ot-core/fuzz';
+
+checkConvergence({ pairs: 100_000 });
+// { pairs: 100000, divergences: 0, ms: 1120, examples: [] }
+```
+
+Zero divergences means nothing on its own — a broken harness reports zero too. So
+the same runner accepts the transform under test, and there is a deliberately
+wrong one to compare against:
+
+```js
+import { checkConvergence, identityTransform } from 'ot-core/fuzz';
+
+checkConvergence({ pairs: 100_000, transform: identityTransform }).divergences;
+// 46990  — 47% of pairs, which is what a transform that ignores
+//          the other operation looks like
+```
+
+That is the number that makes the zero worth something.
+
+**[Try it in the browser →](visualizer/)** — edit two operations, watch them
+transform against each other, and run either fuzzer live. The page imports this
+library rather than reimplementing it, so every figure on it is computed by the
+same code npm installs.
+
+### What this does not claim
+
+TP1 is convergence for a *pair* of concurrent operations, and that is all that is
+tested. This library does not implement TP2, so it makes no claim about three or
+more operations transformed against each other in different orders — the case an
+undo of an old edit can reach. That limitation is documented in `src/undo.js`
+rather than worked around.
+
+
 ## Why this exists
 
 I wrote an OT implementation for a collaborative code editor, load-tested it to
