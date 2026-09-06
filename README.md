@@ -4,6 +4,7 @@
 [![npm](https://img.shields.io/npm/v/ot-core.svg)](https://www.npmjs.com/package/ot-core)
 [![zero dependencies](https://img.shields.io/badge/dependencies-0-brightgreen.svg)](package.json)
 [![playground](https://img.shields.io/badge/playground-live-60a5fa.svg)](https://yuvrajinbhakti.github.io/ot-core/demo/)
+[![visualizer](https://img.shields.io/badge/convergence-check%20it%20yourself-6bbf8a.svg)](https://yuvrajinbhakti.github.io/ot-core/visualizer/)
 
 Operational Transform for plain text, with the convergence property actually
 tested.
