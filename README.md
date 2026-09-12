@@ -17,6 +17,56 @@ Zero dependencies. ESM. Node 18+ and any modern browser.
 
 ---
 
+## Two people, one line, thirty seconds
+
+```js
+import { Client } from 'ot-core/client';
+import { Server } from 'ot-core/server';
+import { insert } from 'ot-core';
+
+const server = new Server({ document: 'hello world' });
+const clients = new Map();
+const wire = [];   // messages in flight, so both edits are genuinely concurrent
+
+for (const id of ['ana', 'ben']) {
+  clients.set(id, new Client({
+    id,
+    document: server.document,
+    revision: server.revision,
+    send: (message) => wire.push([id, message]),
+  }));
+}
+
+// Both type before either message reaches the server.
+clients.get('ana').edit(insert(5, ' there'));   // ana sees "hello there world"
+clients.get('ben').edit(insert(11, '!'));       // ben sees "hello world!"
+
+// Deliver. The server orders them; whichever arrives late gets rebased.
+while (wire.length) {
+  const [from, message] = wire.shift();
+  const { ack, broadcast } = server.receive(from, message);
+  if (broadcast) for (const [id, c] of clients) if (id !== from) c.receive(broadcast);
+  if (ack) clients.get(from).receive(ack);
+}
+
+clients.get('ana').document;   // "hello there world!"
+clients.get('ben').document;   // "hello there world!"
+server.document;               // "hello there world!"
+```
+
+Two people held different documents a moment ago and both edits survived.
+Nothing was overwritten and nobody had to resolve a conflict.
+
+That is the whole product. Everything below is either how it works, or why you
+should not take the previous sentence on trust.
+
+There is no transport in that example on purpose — `send` is a function you
+write, so this works over WebSocket, Socket.IO, `postMessage`, or an array. A
+ready-made WebSocket binding is in [`ot-core/websocket`](#the-client-and-the-server),
+and editor bindings for CodeMirror 5 and 6 are included.
+
+---
+
 ## Convergence, checkable
 
 One law defines correctness here. For two edits written against the same
@@ -56,6 +106,27 @@ That is the number that makes the zero worth something.
 transform against each other, and run either fuzzer live. The page imports this
 library rather than reimplementing it, so every figure on it is computed by the
 same code npm installs.
+
+## When to use something else
+
+Honest positioning, with the package facts checked against the npm registry on
+2026-09-07 rather than remembered:
+
+| | What it is | Reach for it when |
+|---|---|---|
+| **[`sharedb`](https://www.npmjs.com/package/sharedb)** 6.0.3 | A full OT **database backend** — persistence, pub/sub, presence, JSON documents. 5 dependencies. | You want the whole stack, not a text algebra. It is the serious production answer and it is actively maintained. |
+| **[`yjs`](https://www.npmjs.com/package/yjs)** 13.6.32 | A **CRDT**, not OT. Converges without a central server. | You need offline editing, peer-to-peer, or no authoritative server. CRDTs buy that; they cost more memory and a different set of trade-offs. |
+| **[`ot`](https://www.npmjs.com/package/ot)** 0.0.15 | The original JavaScript OT library. Last published **November 2014**. | Reference reading. Eleven years without a release is a decision someone else made for you. |
+| **`ot-core`** | Plain text only. The algebra, a client state machine, a server, editor bindings. Zero dependencies. | You want text collaboration you can hold in your head, with the correctness property exported so you can check it rather than trust it. |
+
+**This is not a CRDT.** It needs a server to order operations. If your
+requirement is two peers syncing directly with no authority, this is the wrong
+tool and Yjs is the right one — that is not a gap to be closed later, it is a
+different model.
+
+**Plain text only.** No rich text, no JSON, no nested documents. An operation
+here is one position and one length. If you need formatting or structure, Quill
+Delta and `ot-json1` model that and this does not.
 
 ### What this does not claim
 

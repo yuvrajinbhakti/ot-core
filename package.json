@@ -61,12 +61,18 @@
   },
   "keywords": [
     "codemirror",
+    "codemirror6",
     "collaborative-editing",
+    "collaborative-text-editor",
+    "concurrent-editing",
     "convergence",
-    "crdt",
     "operational-transform",
+    "operational-transformation",
     "ot",
-    "realtime"
+    "property-testing",
+    "realtime",
+    "tp1",
+    "zero-dependencies"
   ],
   "license": "MIT",
   "author": "Yuvraj Singh Nain",
