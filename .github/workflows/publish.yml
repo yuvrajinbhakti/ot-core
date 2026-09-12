@@ -1,0 +1,122 @@
+# Publishing, without a credential on anyone's laptop.
+#
+# npm is retiring the tokens that bypass two-factor auth — Classic Automation
+# tokens are gone, and granular tokens can no longer bypass 2FA for a direct
+# publish. What replaces them is Trusted Publishing: npm verifies a short-lived
+# OIDC token minted by GitHub for this specific workflow in this specific
+# repository, and no long-lived secret exists to leak.
+#
+# That is a better arrangement than the one it replaces, for a reason worth
+# stating: a token on a laptop can publish anything, from anywhere, forever. This
+# can only publish this package, only from this workflow, only on a tagged
+# release, and only if the tests pass first.
+#
+# ## One-time setup on npmjs.com, which cannot be done from here
+#
+#   npmjs.com → ot-core → Settings → Trusted Publisher → GitHub Actions
+#     Organization or user:  yuvrajinbhakti
+#     Repository:            ot-core
+#     Workflow filename:     publish.yml
+#     Environment:           (leave empty)
+#
+# Until that exists, this workflow will fail at the publish step with a message
+# saying the OIDC token was not trusted. That failure is the correct behaviour
+# and not a bug in this file.
+
+name: publish
+
+on:
+  # The normal path: cut a GitHub release, this publishes what it points at.
+  release:
+    types: [published]
+  # The escape hatch, for a version that is already committed and tagged.
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      # The whole mechanism. Without this the runner cannot mint an OIDC token
+      # and npm has nothing to verify.
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      # Trusted publishing needs npm 11.5.1 or newer, and Node 22 ships older
+      # than that. Pinning to a major rather than `latest` so a breaking npm
+      # release cannot silently change how this publishes.
+      - name: npm new enough for trusted publishing
+        run: |
+          npm install -g npm@^11
+          npm --version
+
+      - run: npm ci
+
+      # Publishing from CI is only an improvement if CI actually checks
+      # something first. This is the same suite the test workflow runs —
+      # 169 tests plus the type surface — and the package does not go out if
+      # any of it fails.
+      - name: the tests that make the claim
+        run: npm test
+
+      # The runtime-dependency count is a claim on the README and in the
+      # positioning table. Checking it here means it cannot quietly stop being
+      # true between releases.
+      - name: still zero runtime dependencies
+        run: |
+          count=$(node -p "Object.keys(require('./package.json').dependencies ?? {}).length")
+          echo "runtime dependencies: $count"
+          test "$count" -eq 0
+
+      # A release tagged v1.6.0 that publishes 1.5.9 is the kind of mismatch
+      # nobody notices until someone installs the wrong thing. Only meaningful
+      # on the release trigger; a manual run has no tag to compare against.
+      - name: the tag and package.json agree
+        if: github.event_name == 'release'
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg=$(node -p "require('./package.json').version")
+          echo "tag: $tag   package.json: $pkg"
+          test "$tag" = "$pkg"
+
+      # Refuse early and clearly if this version is already on the registry,
+      # rather than letting npm answer with a 403 that reads like an auth
+      # problem and sends the next person hunting for a token.
+      - name: this version is not already published
+        run: |
+          name=$(node -p "require('./package.json').name")
+          version=$(node -p "require('./package.json').version")
+          if npm view "$name@$version" version >/dev/null 2>&1; then
+            echo "$name@$version is already on the registry."
+            exit 1
+          fi
+          echo "$name@$version is new."
+
+      # No NODE_AUTH_TOKEN. That absence is the feature.
+      - name: publish
+        run: npm publish
+
+      # Trust the registry, not the exit code. A publish that reports success
+      # and is not resolvable is exactly the class of thing this package spends
+      # its README arguing about.
+      - name: the registry agrees it happened
+        run: |
+          name=$(node -p "require('./package.json').name")
+          version=$(node -p "require('./package.json').version")
+          for i in $(seq 1 10); do
+            latest=$(npm view "$name" version 2>/dev/null || true)
+            echo "attempt $i: registry says $latest"
+            [ "$latest" = "$version" ] && exit 0
+            sleep 6
+          done
+          echo "registry never caught up to $version"
+          exit 1
