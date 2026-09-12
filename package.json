@@ -54,7 +54,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node --test \"test/*.test.js\" && npm run test:types",
+    "test": "node --test test/*.test.js && npm run test:types",
     "bench": "node bench/transform.bench.js && node bench/session.bench.js",
     "demo": "node demo/serve.js",
     "test:types": "tsc -p test/types/tsconfig.json"
