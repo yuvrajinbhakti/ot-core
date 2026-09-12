@@ -40,3 +40,14 @@ export function isServerMessage(message: unknown): boolean;
 export function encode(message: ClientMessage | ServerMessage): string;
 export function decodeClientMessage(text: string): ClientMessage;
 export function decodeServerMessage(text: string): ServerMessage;
+
+/**
+ * Parse JSON and run it through a validator before returning it.
+ *
+ * `decodeClientMessage` and `decodeServerMessage` are this with the right
+ * validator already supplied; reach for those unless you have a message shape of
+ * your own to police.
+ *
+ * @throws {TypeError} if the text is not JSON, or `check` rejects the result.
+ */
+export function decode(text: string, check: (m: unknown) => string | null): any;

@@ -1,5 +1,5 @@
 import type { Operation, Selection } from './index.js';
-import type { ClientMessage, HistoryEntry } from './protocol.js';
+import type { ClientMessage } from './protocol.js';
 
 export const SYNCHRONIZED: 'synchronized';
 export const AWAITING: 'awaiting';

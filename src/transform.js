@@ -36,10 +36,40 @@ const NOOP = Object.freeze({ type: 'delete', position: 0, content: '', length: 0
  *   wrong is silent: everything works until two people type in the same place.
  * @returns {Operation}
  */
+/** The operand check transform needs before it does any arithmetic. */
+function assertOperand(op, name) {
+  if (op === null || typeof op !== 'object' || Array.isArray(op)) {
+    throw new TypeError(`transform() operand ${name} must be an operation object, got ${op === null ? 'null' : Array.isArray(op) ? 'array' : typeof op}`);
+  }
+  if (op.type !== 'insert' && op.type !== 'delete') {
+    throw new TypeError(`transform() operand ${name} needs type "insert" or "delete", got ${JSON.stringify(op.type)}`);
+  }
+  if (!Number.isInteger(op.position) || op.position < 0) {
+    throw new TypeError(`transform() operand ${name} needs a non-negative integer position, got ${JSON.stringify(op.position)}`);
+  }
+  if (!Number.isInteger(op.length) || op.length < 0) {
+    throw new TypeError(`transform() operand ${name} needs a non-negative integer length, got ${JSON.stringify(op.length)}`);
+  }
+}
+
 export function transform(a, b, side) {
   if (side !== 'left' && side !== 'right') {
     throw new TypeError(`transform() needs side 'left' or 'right', got ${JSON.stringify(side)}`);
   }
+
+  // Every branch below is guarded by a `type` comparison, and there is no final
+  // `else`. An operand with an unrecognised type therefore matched nothing and
+  // fell through to the last return, doing arithmetic against `undefined` and
+  // manufacturing an operation with a NaN position:
+  //
+  //   transform(insert(0, 'a'), { type: 'nope' }, 'left')
+  //   // → { type: 'insert', position: NaN, content: 'a', length: NaN }
+  //
+  // `apply` then clamped that NaN to 0, so the text arrived in the wrong place
+  // rather than anything failing. Checking the operands here means the only
+  // operations this function can return are ones it actually reasoned about.
+  assertOperand(a, 'a');
+  assertOperand(b, 'b');
 
   if (a.type === 'insert' && b.type === 'insert') {
     if (a.position < b.position) return a;

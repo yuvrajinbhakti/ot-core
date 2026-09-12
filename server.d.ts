@@ -24,8 +24,15 @@ export class Server {
   /** The oldest revision still rebaseable; non-zero once compacted. */
   readonly baseRevision: number;
 
-  /** What a joining client needs. */
-  snapshot(): ServerMessage;
+  /**
+   * What a joining client needs.
+   *
+   * Narrowed to the `init` variant rather than the whole `ServerMessage` union.
+   * This always returns an init — the wide type was not wrong, it was useless:
+   * every caller had to narrow a union to reach `document` and `revision`, which
+   * are present on every value this can return.
+   */
+  snapshot(): Extract<ServerMessage, { type: 'init' }>;
 
   /** @throws {RangeError} if that revision has been compacted away. */
   since(revision: number): HistoryEntry[];

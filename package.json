@@ -54,9 +54,10 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node --test test/*.test.js",
+    "test": "node --test \"test/*.test.js\" && npm run test:types",
     "bench": "node bench/transform.bench.js && node bench/session.bench.js",
-    "demo": "node demo/serve.js"
+    "demo": "node demo/serve.js",
+    "test:types": "tsc -p test/types/tsconfig.json"
   },
   "keywords": [
     "codemirror",
@@ -84,6 +85,7 @@
   "devDependencies": {
     "@codemirror/state": "^6.7.1",
     "@codemirror/view": "^6.43.9",
+    "typescript": "^7.0.2",
     "ws": "^8.21.3"
   },
   "peerDependencies": {

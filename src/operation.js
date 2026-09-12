@@ -59,11 +59,38 @@ export function isNoop(op) {
  * @returns {string}
  */
 export function apply(doc, op) {
+  if (typeof doc !== 'string') {
+    // `Array.from(42)` is `[]`, so a non-string document used to become the
+    // empty string and then whatever the operation inserted. Silently.
+    throw new TypeError(`apply() needs a string document, got ${doc === null ? 'null' : typeof doc}`);
+  }
+  if (op === null || typeof op !== 'object' || Array.isArray(op)) {
+    throw new TypeError(`apply() needs an operation object, got ${op === null ? 'null' : Array.isArray(op) ? 'array' : typeof op}`);
+  }
+  if (op.type !== 'insert' && op.type !== 'delete') {
+    // This is the one that mattered. The dispatch below used to read
+    // `if (type === 'insert')` and fall through to delete for everything else,
+    // so a typo'd or corrupted type removed text instead of being refused.
+    throw new TypeError(`apply() needs type "insert" or "delete", got ${JSON.stringify(op.type)}`);
+  }
+  if (!Number.isInteger(op.position) || op.position < 0) {
+    // A NaN position clamps to 0 rather than erroring, which puts the text in
+    // the wrong place — the failure mode `transform` used to feed it.
+    throw new TypeError(`apply() needs a non-negative integer position, got ${JSON.stringify(op.position)}`);
+  }
+
   const chars = Array.from(doc);
+
+  // Out-of-range positions are still clamped rather than rejected. That is
+  // deliberate and load-bearing: a transformed operation can legitimately point
+  // just past the end of a document that shrank underneath it, and a library
+  // that throws there is unusable in the exact situation it exists for. The
+  // checks above are about operations that are malformed, not ones that are
+  // merely stale.
   const position = Math.max(0, Math.min(op.position, chars.length));
 
   if (op.type === 'insert') {
-    chars.splice(position, 0, ...Array.from(op.content));
+    chars.splice(position, 0, ...Array.from(op.content ?? ''));
     return chars.join('');
   }
 

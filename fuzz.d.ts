@@ -1,4 +1,4 @@
-import type { Operation } from './index.js';
+import type { Operation, Side } from './index.js';
 
 /** A deterministic pseudo-random source, so a failure reproduces from its seed. */
 export function makeRandom(seed: number): () => number;
@@ -14,6 +14,15 @@ export function randomDocument(random: () => number): string;
  * Convergence means these two strings are equal.
  */
 export function bothOrderings(doc: string, a: Operation, b: Operation): [string, string];
+
+/**
+ * A transform that does nothing, for checking that the check works.
+ *
+ * Pass it as `checkConvergence({ transform: identityTransform })` to confirm the
+ * property can fail: it diverges on roughly half of all pairs. A fuzzer that
+ * reports zero against this one is measuring nothing.
+ */
+export const identityTransform: (a: Operation) => Operation;
 
 /** Human-readable form of an operation, for reporting a counterexample. */
 export function describe(op: Operation): string;
@@ -49,6 +58,14 @@ export interface ConvergenceOptions {
   progressEvery?: number;
   /** Clock, injectable for testing. Default `Date.now`. */
   now?: () => number;
+  /**
+   * The transform under test. Defaults to this library's.
+   *
+   * Pass `identityTransform` to confirm the property can fail — a fuzzer that
+   * reports zero divergences against a transform that does nothing is measuring
+   * nothing.
+   */
+  transform?: (a: Operation, b: Operation, side: Side) => Operation;
 }
 
 /**
